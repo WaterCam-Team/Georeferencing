@@ -1,0 +1,18 @@
+# Core (calibration + flat/terrain georeferencing)
+opencv-python>=4.8
+numpy>=1.24
+pyproj>=3.6
+Pillow>=10.0
+piexif>=1.1
+scipy>=1.11
+
+# Tests
+pytest>=7.0
+
+# Optional (install as needed):
+rasterio #    — DEM GeoTIFF in georeference_tool, georeference_terrain, flood_map
+laspy[lazrs] #— LAS/LAZ in georeference_terrain (lazrs needed for .laz decompression)
+gdal #         — GeoTIFF export
+# python-xmp-toolkit (libxmp) — XMP IMU fallback in georeference.py
+# torch, sam2  — SHARP / SAM 2 in georeference_sharp, flood_map
+# segment-anything — SAM 1 in flood_map
