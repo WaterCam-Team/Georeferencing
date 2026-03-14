@@ -21,6 +21,9 @@ from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional
 
+from camera_geometry import build_rotation_matrix
+from geo_core import pixel_to_world_flat
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1: CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
@@ -411,33 +414,10 @@ def build_extrinsic_matrix(lat: float, lon: float, altitude: float,
         t (3x1): translation (camera origin in world ENU coords)
         origin  : (lat, lon, alt) of camera
     """
-    h = np.radians(heading_deg)
-    p = np.radians(pitch_deg)
-    r = np.radians(roll_deg)
+    # Use shared geometry so conventions match georeference_tool
+    R = build_rotation_matrix(heading_deg, pitch_deg, roll_deg)
 
-    # Rotation matrices (intrinsic, applied in yaw->pitch->roll order)
-    Rz = np.array([[ np.cos(h), np.sin(h), 0],   # yaw (heading)
-                   [-np.sin(h), np.cos(h), 0],
-                   [         0,          0, 1]])
-
-    Rx = np.array([[1,          0,           0],   # pitch
-                   [0,  np.cos(p), -np.sin(p)],
-                   [0,  np.sin(p),  np.cos(p)]])
-
-    Ry = np.array([[ np.cos(r), 0, np.sin(r)],    # roll
-                   [         0, 1,          0],
-                   [-np.sin(r), 0, np.cos(r)]])
-
-    # Combined rotation: world ENU -> camera frame
-    # Also apply 90° rotation to convert ENU (X=E, Y=N, Z=up)
-    # to camera convention (X=right, Y=down, Z=forward)
-    R_enu_to_cam = np.array([[1,  0,  0],
-                              [0,  0, -1],
-                              [0,  1,  0]])
-
-    R = R_enu_to_cam @ Rx @ Rz @ Ry
-
-    # Translation: camera position in ENU is origin (0,0,0)
+    # Translation: for local ENU we treat camera as origin
     t = np.zeros((3, 1))
 
     return R, t, (lat, lon, altitude)
@@ -472,44 +452,14 @@ def pixel_to_ground_coords(pixel_xy: tuple, intrinsics: CameraIntrinsics,
 
     NOTE: This assumes flat ground. For sloped terrain, you'd need a DEM.
     """
-    from pyproj import Proj, Transformer
-
-    K    = intrinsics.K_np()
-    K_inv = np.linalg.inv(K)
-
-    u, v = pixel_xy
-
-    # Step 1: Pixel → normalized camera ray (homogeneous)
-    pixel_h = np.array([u, v, 1.0])
-    ray_cam = K_inv @ pixel_h          # ray in camera coordinate frame
-    ray_cam = ray_cam / np.linalg.norm(ray_cam)
-
-    # Step 2: Rotate ray into world (ENU) frame
-    ray_world = R.T @ ray_cam          # R.T = inverse rotation
-
-    # Step 3: Intersect ray with ground plane (Z=0 in ENU)
-    # Camera is at height h above ground → camera origin in ENU = (0, 0, h)
-    # Ray: P = cam_origin + lambda * ray_world
-    # Ground plane: Z = 0  → cam_origin.Z + lambda * ray_world.Z = 0
-    # Solve for lambda:
-    cam_origin_enu = np.array([0.0, 0.0, camera_height_m])
-
-    if abs(ray_world[2]) < 1e-6:
-        raise ValueError("Ray is parallel to the ground plane — no intersection.")
-
-    lam = -cam_origin_enu[2] / ray_world[2]
-
-    if lam < 0:
-        raise ValueError("Ground intersection is behind the camera.")
-
-    ground_enu = cam_origin_enu + lam * ray_world
-    east_m, north_m = ground_enu[0], ground_enu[1]
-
-    # Step 4: Convert ENU offset (meters) to lat/lon
-    # Use a local azimuthal equidistant projection centered on the camera
-    proj = Proj(proj='aeqd', lat_0=origin_lat, lon_0=origin_lon, datum='WGS84')
-    lon_out, lat_out = proj(east_m, north_m, inverse=True)
-
+    K = intrinsics.K_np()
+    result = pixel_to_world_flat(
+        pixel_xy[0], pixel_xy[1], K, R,
+        origin_lat, origin_lon, camera_height_m,
+    )
+    if result is None:
+        raise ValueError("Ray is parallel to the ground plane or points upward — no intersection.")
+    lat_out, lon_out = result
     return lat_out, lon_out
 
 
