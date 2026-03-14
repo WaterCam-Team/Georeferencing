@@ -19,6 +19,7 @@ import os
 import glob
 from pathlib import Path
 from dataclasses import dataclass, asdict
+from typing import Optional
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1: CONFIGURATION
@@ -27,9 +28,9 @@ from dataclasses import dataclass, asdict
 # STEP 1: Set your checkerboard dimensions.
 # These are the number of INTERIOR corners (not squares).
 # Example: a 9x6 board has 8x5 interior corners.
-BOARD_W = 8          # interior corners horizontally
-BOARD_H = 7          # interior corners vertically
-SQUARE_SIZE_M = 0.032  # physical size of one square in meters (e.g. 2.5 cm)
+BOARD_W = 24          # interior corners horizontally
+BOARD_H = 17          # interior corners vertically
+SQUARE_SIZE_M = 0.03  # physical size of one square in meters (e.g. 2.5 cm)
 
 BOARD_SIZE = (BOARD_W, BOARD_H)
 
@@ -50,16 +51,17 @@ class CameraIntrinsics:
         cx, cy = principal point (optical center in pixels)
 
     D (distortion coefficients):
-        [k1, k2, p1, p2, k3]
-        k1, k2, k3 = radial distortion
-        p1, p2     = tangential distortion
+        [k1, k2, p1, p2, k3] or with CALIB_RATIONAL_MODEL [k1, k2, p1, p2, k3, k4, k5, k6]
+        k1..k3 (and optionally k4..k6) = radial; p1, p2 = tangential
 
     rms: reprojection error in pixels (lower is better; <1.0 is good)
+    camera_height_m: optional mounting height above ground (saved for georeferencing)
     """
     K: list          # 3x3 camera matrix as nested list
-    D: list          # 1x5 distortion coefficients
+    D: list          # 1x5 or 1x8 distortion coefficients
     img_size: list   # [width, height]
     rms: float       # reprojection error
+    camera_height_m: Optional[float] = None  # height above ground in meters (user-provided)
 
     def K_np(self):
         return np.array(self.K, dtype=np.float64)
@@ -76,7 +78,14 @@ class CameraIntrinsics:
     def load(cls, path: str):
         with open(path) as f:
             d = json.load(f)
-        return cls(**d)
+        # Support older calibration files without camera_height_m
+        return cls(
+            K=d["K"],
+            D=d["D"],
+            img_size=d["img_size"],
+            rms=d["rms"],
+            camera_height_m=d.get("camera_height_m"),
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -88,10 +97,12 @@ def capture_calibration_images(output_dir: str, n_images: int = 20, camera_index
     STEP 2 (Live capture): Open a camera feed and save frames when SPACE is
     pressed. Press Q to quit.
 
-    INSTRUCTIONS:
+    INSTRUCTIONS (for low reprojection error):
       - Print a checkerboard pattern (search "OpenCV checkerboard PDF" online).
       - Mount it flat on a rigid surface — no warping.
-      - Move the board to cover different positions, angles, and distances.
+      - Vary pose: tilt the board (not always level), different distances (near/far),
+        and positions (center, corners, edges). Level-only or same-distance views
+        give high RMS; variety is essential.
       - Aim for 15-25 images with varied orientations.
       - Avoid motion blur; ensure good, even lighting.
 
@@ -133,8 +144,27 @@ def capture_calibration_images(output_dir: str, n_images: int = 20, camera_index
 # SECTION 4: INTRINSIC CALIBRATION
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _reprojection_errors_per_image(objpoints, imgpoints, K, D, rvecs, tvecs):
+    """Compute RMS reprojection error per image (in pixels)."""
+    errors = []
+    for i in range(len(objpoints)):
+        projected, _ = cv2.projectPoints(
+            objpoints[i], rvecs[i], tvecs[i], K, D
+        )
+        projected = projected.reshape(-1, 2)
+        diff = imgpoints[i].reshape(-1, 2) - projected
+        rms_i = np.sqrt(np.mean(diff ** 2))
+        errors.append(float(rms_i))
+    return np.array(errors)
+
+
 def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
-                     show_corners: bool = True) -> CameraIntrinsics:
+                     show_corners: bool = True,
+                     reject_outliers: bool = True,
+                     outlier_threshold_px: float = 2.0,
+                     use_rational_model: bool = True,
+                     max_outlier_rounds: int = 3,
+                     camera_height_m: Optional[float] = None) -> CameraIntrinsics:
     """
     STEP 3: Detect checkerboard corners in all images and compute intrinsics.
 
@@ -142,12 +172,18 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
       - Finds the 2D positions of checkerboard corners in each image
       - Pairs them with known 3D positions (flat board = Z=0)
       - Solves for K and D using OpenCV's calibrateCamera()
+      - Optionally removes images with high per-image error and re-calibrates
 
-    INSTRUCTIONS:
-      - Set image_dir to the folder containing your calibration images.
-      - Set BOARD_W, BOARD_H, SQUARE_SIZE_M at the top of this file.
-      - Aim for RMS reprojection error < 1.0 pixel.
-        If higher: retake images, ensure board is flat, improve lighting.
+    INSTRUCTIONS FOR LOWER RMS ERROR:
+      - Vary board pose: tilt the board (left/right, up/down), don't keep it
+        always level. Level-only views give poor constraint on intrinsics.
+      - Vary distance: include both near and far shots so the board fills
+        different portions of the frame (reduces correlation between K and pose).
+      - Move the board to different positions: corners, center, edges of frame.
+      - Ensure SQUARE_SIZE_M is exact (measure with a ruler).
+      - Keep board flat and rigid; avoid motion blur and uneven lighting.
+      Aim for RMS < 1.0 pixel. If higher: add more varied poses or enable
+      reject_outliers to drop bad frames.
     """
     # 3D object points for one board image (Z=0 since board is flat)
     objp = np.zeros((BOARD_W * BOARD_H, 3), np.float32)
@@ -156,6 +192,7 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
 
     objpoints = []  # 3D points in world space
     imgpoints = []  # 2D points in image space
+    valid_paths = []  # paths for images that had corners found (same order as objpoints)
     img_size  = None
 
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
@@ -179,6 +216,7 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
             corners_refined = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
             objpoints.append(objp)
             imgpoints.append(corners_refined)
+            valid_paths.append(path)
 
             if show_corners:
                 vis = cv2.drawChessboardCorners(img.copy(), BOARD_SIZE, corners_refined, found)
@@ -193,15 +231,54 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
     if len(objpoints) < 6:
         raise RuntimeError(f"Only {len(objpoints)} valid images. Need at least 6.")
 
-    print(f"\n[CALIBRATE] Running calibration on {len(objpoints)} valid images...")
+    # Calibration flags: rational model adds k4,k5,k6 and can improve wide-angle/phone lenses
+    calib_flags = 0
+    if use_rational_model:
+        calib_flags |= cv2.CALIB_RATIONAL_MODEL
 
-    rms, K, D, rvecs, tvecs = cv2.calibrateCamera(
-        objpoints, imgpoints, img_size, None, None
-    )
+    for round_num in range(max_outlier_rounds):
+        n_used = len(objpoints)
+        print(f"\n[CALIBRATE] Running calibration on {n_used} images (round {round_num + 1})...")
+
+        rms, K, D, rvecs, tvecs = cv2.calibrateCamera(
+            objpoints, imgpoints, img_size, None, None, flags=calib_flags
+        )
+
+        per_image_errors = _reprojection_errors_per_image(
+            objpoints, imgpoints, K, D, rvecs, tvecs
+        )
+
+        if reject_outliers and round_num < max_outlier_rounds - 1:
+            bad = per_image_errors > outlier_threshold_px
+            n_bad = int(np.sum(bad))
+            if n_bad == 0:
+                break
+            if n_used - n_bad < 6:
+                print(f"  [CALIBRATE] Would remove {n_bad} outliers but need ≥6 images; keeping all.")
+                break
+            # Remove worst images
+            keep = ~bad
+            objpoints = [objpoints[i] for i in range(n_used) if keep[i]]
+            imgpoints = [imgpoints[i] for i in range(n_used) if keep[i]]
+            valid_paths = [valid_paths[i] for i in range(n_used) if keep[i]]
+            removed_names = [Path(valid_paths[i]).name for i in range(n_used) if bad[i]]
+            print(f"  Removed {n_bad} outlier(s): {removed_names}")
+        else:
+            break
+
+    # Report per-image errors for the final solution
+    print(f"\n  Per-image RMS (px): min={per_image_errors.min():.3f}, max={per_image_errors.max():.3f}, mean={per_image_errors.mean():.3f}")
+    print("\n  Filename                          RMS (px)")
+    print("  " + "-" * 42)
+    for path, rms in zip(valid_paths, per_image_errors):
+        print(f"  {Path(path).name:32s}  {rms:.4f}")
+    worst_idx = int(np.argmax(per_image_errors))
+    if per_image_errors[worst_idx] > 1.0:
+        print(f"\n  Worst image: {Path(valid_paths[worst_idx]).name} ({per_image_errors[worst_idx]:.3f} px)")
 
     print(f"\n{'='*50}")
     print(f"  RMS Reprojection Error: {rms:.4f} px")
-    print(f"  (< 0.5 = excellent, < 1.0 = good, > 1.0 = retake images)")
+    print(f"  (< 0.5 = excellent, < 1.0 = good, > 1.0 = add varied poses or check SQUARE_SIZE_M)")
     print(f"\n  Camera Matrix K:\n{K}")
     print(f"\n  Distortion Coefficients D:\n{D.ravel()}")
     print(f"{'='*50}\n")
@@ -210,7 +287,8 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
         K=K.tolist(),
         D=D.tolist(),
         img_size=list(img_size),
-        rms=float(rms)
+        rms=float(rms),
+        camera_height_m=camera_height_m,
     )
     intrinsics.save(save_path)
     return intrinsics
@@ -551,7 +629,47 @@ def create_geotiff(image_path: str, gcps: list, output_path: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SECTION 11: MAIN PIPELINE
+# SECTION 11: PROMPT FOR USER-PROVIDED VALUES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def prompt_calibration_inputs() -> tuple:
+    """
+    Ask the user for values that are not obtained from the calibration images.
+    Checkerboard dimensions (BOARD_W, BOARD_H, SQUARE_SIZE_M) remain constants
+    at the top of this file.
+
+    Returns:
+        (image_dir, save_path, camera_height_m)
+        camera_height_m is None if the user leaves it blank.
+    """
+    print("\n[CALIBRATION INPUTS] Enter values (press Enter for default where shown).\n")
+
+    image_dir = input("Folder containing checkerboard images [./calib_images]: ").strip()
+    if not image_dir:
+        image_dir = "./calib_images"
+
+    save_path = input("Path to save calibration JSON [./calibration.json]: ").strip()
+    if not save_path:
+        save_path = "./calibration.json"
+
+    height_str = input(
+        "Camera height above ground in meters (for georeferencing; optional): "
+    ).strip()
+    camera_height_m = None
+    if height_str:
+        try:
+            camera_height_m = float(height_str)
+            if camera_height_m <= 0:
+                print("  (ignored: height must be positive)")
+                camera_height_m = None
+        except ValueError:
+            print("  (ignored: not a number)")
+
+    return image_dir, save_path, camera_height_m
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 12: MAIN PIPELINE
 # ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -561,11 +679,13 @@ if __name__ == "__main__":
     # Optional: capture calibration images live
     # capture_calibration_images("./calib_images", n_images=20)
 
-    # Run calibration on a folder of checkerboard images
+    image_dir, save_path, camera_height_m = prompt_calibration_inputs()
+
     intrinsics = calibrate_camera(
-        image_dir="./calib_images",
-        save_path="./calibration.json",
-        show_corners=True
+        image_dir=image_dir,
+        save_path=save_path,
+        show_corners=True,
+        camera_height_m=camera_height_m,
     )
 
     # ── B. LOAD CALIBRATION (subsequent runs) ────────────────────────────────
@@ -582,10 +702,10 @@ if __name__ == "__main__":
     gcps = georeference_image(
         image_path="./field_image.jpg",
         intrinsics=intrinsics,
-        heading_deg=45.0,      # camera faces NE
-        pitch_deg=-75.0,       # camera angled steeply downward
+        heading_deg=90.0,      # camera faces NE
+        pitch_deg=0.0,       # camera angled steeply downward
         roll_deg=0.0,
-        camera_height_m=10.0,
+        camera_height_m=1.0,
         sample_step=100
     )
 
