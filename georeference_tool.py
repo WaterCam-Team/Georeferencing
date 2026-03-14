@@ -22,6 +22,18 @@ INPUTS REQUIRED:
     - Camera mounting height above ground (meters)
     - Camera orientation: heading, pitch, roll (from IMU log or EXIF)
     - Camera GPS position (from EXIF or manual entry)
+
+ACCURACY — how to improve results:
+    - Calibration: Use calibration.json from checkerboard calibration (camera_calibration.py)
+      with varied board poses and distances; aim for RMS reprojection error < 1.0 px.
+    - Resolution: Calibrate at the same resolution as field images, or use the same camera
+      so calibration img_size matches; the tool scales K automatically when sizes differ.
+    - Camera height: Measure mounting height above ground accurately; errors scale with
+      distance from nadir.
+    - Orientation: Prefer IMU pitch/roll over EXIF when available; calibrate magnetometer
+      for better heading; for downward cameras use negative pitch (e.g. -75°).
+    - Ground plane: The model assumes a flat horizontal ground; for slopes or terrain use
+      a DEM or refine pose from known ground control points (GCPs).
 """
 
 import cv2
@@ -93,14 +105,43 @@ def load_calibrated_intrinsics(calib_path: str) -> tuple:
     Load empirically calibrated K and D from calibration.json
     produced by the calibration script.
     Preferred over nominal values — use this when available.
+
+    Returns:
+        (K, D, img_size) — img_size is [width, height] or None if not in JSON.
+        Use scale_intrinsics_for_resolution() when the current image size
+        differs from img_size so pixel↔ray mapping stays accurate.
     """
     with open(calib_path) as f:
         d = json.load(f)
     K = np.array(d["K"], dtype=np.float64)
     D = np.array(d["D"], dtype=np.float64)
+    img_size = d.get("img_size")  # [width, height] or None
     print(f"[CAMERA] Loaded calibrated intrinsics from {calib_path}")
     print(f"  RMS reprojection error: {d.get('rms', 'N/A')} px")
-    return K, D
+    return K, D, img_size
+
+
+def scale_intrinsics_for_resolution(K: np.ndarray,
+                                    calib_w: int, calib_h: int,
+                                    image_w: int, image_h: int) -> np.ndarray:
+    """
+    Scale camera matrix K from calibration resolution to current image resolution.
+
+    When the field image has a different size than the calibration images (e.g.
+    different crop or downscaling), fx, fy, cx, cy must be scaled so that
+    pixel coordinates map correctly to rays. D (distortion) is unchanged;
+    use the same D and scale K only.
+
+    Returns a new 3×3 K for the current (image_w, image_h).
+    """
+    sx = image_w / calib_w
+    sy = image_h / calib_h
+    K_scaled = K.copy()
+    K_scaled[0, 0] *= sx   # fx
+    K_scaled[0, 2] *= sx   # cx
+    K_scaled[1, 1] *= sy   # fy
+    K_scaled[1, 2] *= sy   # cy
+    return K_scaled
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -722,10 +763,25 @@ if __name__ == "__main__":
 
     # ── LOAD INTRINSICS ───────────────────────────────────────────────────────
     if os.path.exists(CALIB_PATH):
-        K, D = load_calibrated_intrinsics(CALIB_PATH)
+        K, D, calib_img_size = load_calibrated_intrinsics(CALIB_PATH)
+        # Scale K to current image size if different from calibration (improves accuracy)
+        w_img, h_img = image.shape[1], image.shape[0]
+        if calib_img_size and (calib_img_size[0], calib_img_size[1]) != (w_img, h_img):
+            K = scale_intrinsics_for_resolution(
+                K, calib_img_size[0], calib_img_size[1], w_img, h_img
+            )
+            print(f"[CAMERA] Scaled intrinsics to image size {w_img}×{h_img} "
+                  f"(calibration was {calib_img_size[0]}×{calib_img_size[1]})")
     else:
         print(f"[CAMERA] {CALIB_PATH} not found — using nominal OV5647 specs.")
         K, D = nominal_intrinsics_from_specs(OV5647_SPECS)
+        calib_img_size = [OV5647_SPECS["img_w_px"], OV5647_SPECS["img_h_px"]]
+        w_img, h_img = image.shape[1], image.shape[0]
+        if (calib_img_size[0], calib_img_size[1]) != (w_img, h_img):
+            K = scale_intrinsics_for_resolution(
+                K, calib_img_size[0], calib_img_size[1], w_img, h_img
+            )
+            print(f"[CAMERA] Scaled nominal intrinsics to image size {w_img}×{h_img}")
 
     # ── LOAD GPS ──────────────────────────────────────────────────────────────
     if CAMERA_LAT is None or CAMERA_LON is None:
