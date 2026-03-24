@@ -1,0 +1,15 @@
+# uv (https://docs.astral.sh/uv/) — project configuration.
+# Keys here use the uv.toml layout (no [tool.uv] wrapper).
+#
+# This repository installs from requirements.txt. Typical setup:
+#   uv venv
+#   uv pip install -r requirements.txt
+#   uv run pytest -q
+#
+# Active Python version should match .python-version (see repo root).
+
+python-preference = "managed"
+
+[pip]
+# Minimum Python for wheel resolution when using `uv pip install/sync`.
+python-version = "3.13"

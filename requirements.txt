@@ -6,13 +6,17 @@ Pillow>=10.0
 piexif>=1.1
 scipy>=1.11
 
+# Terrain georeferencing (georeference_terrain.py)
+# - rasterio: GeoTIFF / most GDAL-backed rasters for --dem
+# - laspy[lazrs]: LAS and LAZ (--las); lazrs backend needed for .laz decompression
+rasterio>=1.3.0
+laspy[lazrs]>=2.5.0
+
 # Tests
 pytest>=7.0
 
 # Optional (install as needed):
-rasterio #    — DEM GeoTIFF in georeference_tool, georeference_terrain, flood_map
-laspy[lazrs] #— LAS/LAZ in georeference_terrain (lazrs needed for .laz decompression)
-gdal #         — GeoTIFF export
+# gdal — GeoTIFF export from georeference_tool / other scripts
 # python-xmp-toolkit (libxmp) — XMP IMU fallback in georeference.py
-# torch, sam2  — SHARP / SAM 2 in georeference_sharp, flood_map
+# torch, sam2 — SHARP / SAM 2 in georeference_sharp, flood_map
 # segment-anything — SAM 1 in flood_map
