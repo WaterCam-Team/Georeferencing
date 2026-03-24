@@ -139,15 +139,17 @@ GCPs are **known geographic positions** (and optionally elevation) that you can 
   - **Elevation** (meters, and note the datum: e.g. orthometric/NAVD88 vs ellipsoidal)  
   - **Where it appears in the photo** (e.g. “center of manhole in lower-left of image”) so you can click the same point in the georeferencing tool.
 
-### 4.3 Using GCPs to validate georeferencing
+### 4.3 Using GCPs to validate and improve georeferencing
 
-1. Run the georeferencing tool (e.g. `georeference_tool.py` or terrain-based tool).  
-2. **Click** each GCP in the image and note the **predicted** (lat, lon) — and elevation if the tool outputs it.  
-3. **Compare** predicted vs known coordinates. Large residuals indicate:
-   - Camera height error (especially with distance from nadir),  
-   - Heading or pitch bias (systematic drift in one direction),  
-   - Or vertical datum mismatch (if using elevation).  
-4. You can then **adjust** camera height, heading offset, or pitch offset and re-run until residuals are acceptable, or use GCPs in a formal bundle adjustment if you implement or use such a step.
+**In `georeference_tool.py` (interactive):**
+
+1. Run the tool and load an image with camera pose (EXIF or manual).  
+2. **Add GCPs:** Left-click a point in the image, then press **G**. Enter the **known** latitude, longitude, and optionally elevation for that point. Repeat for at least 3 GCPs (spread across the image).  
+3. **Refine pose:** Press **R** to refine camera position (lat, lon), height, and orientation (heading, pitch, roll) by minimizing the error at GCPs. The tool prints the RMS residual and per-GCP error in metres.  
+4. **Optional — TPS warp:** With **6 or more** GCPs, press **W** to fit a thin-plate spline from pixel (u, v) to (lat, lon). When TPS is ON, every click uses this warp instead of the camera model, which can improve local accuracy where GCPs are dense.  
+5. **Load/save GCPs:** Press **L** to load GCPs from a CSV file; press **E** to save the current GCPs to CSV (columns: label, pixel_u, pixel_v, lat, lon, elev_m). You can set `GCP_CSV` in the script config to load GCPs automatically on start.
+
+**Validation only (no refinement):** Click each GCP in the image and compare the **predicted** (lat, lon) to known coordinates. Large residuals indicate camera height, heading/pitch bias, or vertical datum issues; use pose refinement (R) or adjust and re-run.
 
 ---
 
@@ -225,7 +227,7 @@ For **multiple photos** with EXIF GPS + IMU, **`georeference3d.py`** can run str
 
 ## 7. Vertical datum and accuracy
 
-- **EXIF altitude** is often **ellipsoidal** (WGS84) and can be noisy. **DEMs** are often **orthometric** (e.g. NAVD88). **Do not mix** them without conversion: a 20–30 m vertical error can cause large horizontal errors in ray intersection.  
+- **EXIF altitude** is often **ellipsoidal** (WGS84) and can be noisy. **DEMs** are often **orthometric** (e.g. EGM96, EGM2008, NAVD88). **Do not mix** them without conversion: a 15–35 m vertical error can cause large horizontal errors in ray intersection. The `vertical_datum` module and `georeference_terrain.py` options `--terrain-vertical-datum` / `--camera-elev-datum` allow checking and conversion when PROJ geoid grids are available.  
 - **Best practice for terrain workflows:** Compute camera elevation as **ground elevation at the camera (from DEM) + mounting height above ground**, and use that value (in the same datum as the DEM) for ray–terrain intersection. The helper `geo_core.camera_elev_from_dem(get_elevation, cam_lat, cam_lon, mount_height_m)` does this; `georeference_terrain.py` uses it when you pass `--height-above-ground`.  
 - **Flat-ground workflows:** Camera height is “height above ground”; the model assumes the ground is a horizontal plane at that reference.
 
