@@ -7,6 +7,7 @@ Camera calibration and pixel→GPS georeferencing for fixed-position and mobile 
 - **Calibrate camera:** `python camera_calibration.py` (checkerboard images → `calibration.json`)
 - **Georeference (flat ground):** `python georeference_tool.py` (interactive click-to-GPS)
 - **Georeference (terrain):** `python georeference_terrain.py photo.jpg --dem dem.tif --lat ... --lon ... --elev ...`
+- **Inspect DEM/LAS metadata (CRS, bounds, vertical hints):** `python scripts/dump_dataset_crs.py --dem your.tif --las your.las` (optional `--las-crs EPSG` if the cloud has no CRS)
 
 ## Full procedure
 
@@ -20,6 +21,7 @@ Camera calibration and pixel→GPS georeferencing for fixed-position and mobile 
 | `camera_geometry.py` | Shared rotation matrix (ENU ↔ camera); used by calibration and georeferencing |
 | `georeference_tool.py` | Interactive click-to-GPS (flat ground), batch, optional GeoTIFF; uses calibration + IMU log or EXIF |
 | `georeference_terrain.py` | Click-to-GPS with DEM and/or LAS/LAZ terrain intersection |
+| `scripts/dump_dataset_crs.py` | Print CRS, bounds, nodata, and quick stats for rasters and LAS/LAZ before terrain georeferencing |
 | `add_imu.py` | Write Roll/Pitch/Yaw to EXIF UserComment for images |
 
 ## Dependencies

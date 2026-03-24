@@ -165,7 +165,7 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
                      show_corners: bool = True,
                      reject_outliers: bool = True,
                      outlier_threshold_px: float = 2.0,
-                     use_rational_model: bool = True,
+                     use_rational_model: bool = False,
                      max_outlier_rounds: int = 3,
                      camera_height_m: Optional[float] = None) -> CameraIntrinsics:
     """
