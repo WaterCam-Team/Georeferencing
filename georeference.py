@@ -12,18 +12,14 @@ Install:
 """
 
 import math
-import re
 from dataclasses import dataclass
 
 import numpy as np
-from PIL import Image, ExifTags
-import piexif
-from libxmp import XMPFiles, consts
-from pyproj import CRS, Transformer
-from libxmp import XMPFiles, consts
+from libxmp import XMPFiles
 from libxmp.exempi import ExempiLoadError
+from pyproj import CRS, Transformer
 
-
+from exif_imu import read_gps_imu_from_exif
 
 # ----------------------------
 # Data structures
@@ -49,137 +45,30 @@ class CameraPoseENU:
 
 
 # ----------------------------
-# Helpers: EXIF GPS
+# Helpers: EXIF GPS (uses central exif_imu)
 # ----------------------------
 
-from fractions import Fraction
-
-def _to_float(r):
-    """
-    Convert various EXIF rational types to float.
-    Handles tuples, Fraction, and Pillow's IFDRational.
-    """
-    # Already a plain number
-    if isinstance(r, (int, float)):
-        return float(r)
-
-    # Pillow IFDRational has .numerator / .denominator
-    if hasattr(r, "numerator") and hasattr(r, "denominator"):
-        return float(r.numerator) / float(r.denominator)
-
-    # Tuple or list (num, den)
-    if isinstance(r, (tuple, list)) and len(r) == 2:
-        num, den = r
-        return float(num) / float(den)
-
-    # Fallback
-    return float(r)
-
-
-def _convert_to_degrees(value):
-    """
-    Convert EXIF GPS (D, M, S) into float degrees.
-
-    'value' can be a list/tuple of 3 rationals, each of which may be:
-      - IFDRational
-      - (num, den)
-      - float/int
-    """
-    d = _to_float(value[0])
-    m = _to_float(value[1])
-    s = _to_float(value[2])
-    return d + m / 60.0 + s / 3600.0
-
-
 def read_exif_gps(path):
-    img = Image.open(path)
-    exif = img._getexif()
-    if exif is None:
-        raise ValueError("No EXIF data found")
-
-    exif_dict = {ExifTags.TAGS.get(k, k): v for k, v in exif.items()}
-    gps_info = exif_dict.get("GPSInfo")
-    if gps_info is None:
+    """Return (lat, lon, alt). Raises if lat/lon missing. alt may be None."""
+    meta = read_gps_imu_from_exif(path)
+    lat, lon, alt = meta.get("lat"), meta.get("lon"), meta.get("alt")
+    if lat is None or lon is None:
         raise ValueError("No GPSInfo in EXIF")
-
-    gps_data = {}
-    for t, v in gps_info.items():
-        name = ExifTags.GPSTAGS.get(t, t)
-        gps_data[name] = v
-
-    # Latitude
-    lat = _convert_to_degrees(gps_data["GPSLatitude"])
-    if gps_data.get("GPSLatitudeRef", "N") != "N":
-        lat = -lat
-
-    # Longitude
-    lon = _convert_to_degrees(gps_data["GPSLongitude"])
-    if gps_data.get("GPSLongitudeRef", "E") != "E":
-        lon = -lon
-
-    # Altitude (optional)
-    alt = None
-    if "GPSAltitude" in gps_data:
-        alt = _to_float(gps_data["GPSAltitude"])
-        if gps_data.get("GPSAltitudeRef", 0) == 1:
-            alt = -alt
-
     return lat, lon, alt
 
 
 # ----------------------------
-# Helpers: EXIF comment / XMP IMU
+# Helpers: XMP IMU fallback
 # ----------------------------
 
-# SU-WaterCam / add_metadata.py format: "Roll 1.5 Pitch -8.0 Yaw 120.0"
-_IMU_PLAIN_RE = re.compile(
-    r"Roll\s+([-\d.]+)\s+Pitch\s+([-\d.]+)\s+Yaw\s+([-\d.]+)",
-    re.IGNORECASE,
-)
-
-
-def read_exif_user_comment(path):
-    """
-    Read EXIF UserComment and parse IMU (roll, pitch, yaw in degrees).
-
-    Expected format (SU-WaterCam / add_metadata.py): "Roll 1.5 Pitch -8.0 Yaw 120.0"
-
-    Returns dict with keys roll_deg, pitch_deg, yaw_deg, or None.
-    """
-    exif_dict = piexif.load(path)
-    exif_ifd = exif_dict.get("Exif") or {}
-    user_comment = exif_ifd.get(piexif.ExifIFD.UserComment)
-    if not user_comment:
-        return None
-
-    try:
-        txt = user_comment.decode(errors="ignore")
-    except Exception:
-        return None
-
-    txt = txt.strip()
-    m = _IMU_PLAIN_RE.search(txt)
-    if not m:
-        return None
-
-    roll_deg = float(m.group(1))
-    pitch_deg = float(m.group(2))
-    yaw_deg = float(m.group(3))
-    return {"roll_deg": roll_deg, "pitch_deg": pitch_deg, "yaw_deg": yaw_deg}
-
-
-
-def read_xmp_imu(path):
-    """
-    Read IMU from XMP (optional). Return dict or None.
-    """
+def _read_xmp_imu(path):
+    """Read IMU from XMP (optional). Return dict or None."""
     xmpfile = None
     try:
         xmpfile = XMPFiles(file_path=path, open_forupdate=False)
         xmp = xmpfile.get_xmp()
         if xmp is None:
             return None
-
         imu_ns = "http://example.com/imu/1.0/"
         yaw = float(xmp.get_property(imu_ns, "yaw"))
         pitch = float(xmp.get_property(imu_ns, "pitch"))
@@ -192,17 +81,21 @@ def read_xmp_imu(path):
             except Exception:
                 pass
 
+
 def get_imu_orientation(path):
     """
-    Merge IMU reports from EXIF UserComment and XMP (XMP optional).
+    Merge IMU from EXIF (via exif_imu) and XMP (optional fallback).
     Returns yaw, pitch, roll in radians.
     """
-    imu = read_exif_user_comment(path) or {}
-
-    # Only try XMP when EXIF had no IMU (avoids libxmp __del__ issues when EXIF is present)
-    if not imu:
+    meta = read_gps_imu_from_exif(path)
+    imu = {
+        "roll_deg": meta.get("roll_deg"),
+        "pitch_deg": meta.get("pitch_deg"),
+        "yaw_deg": meta.get("yaw_deg"),
+    }
+    if not any(imu.values()):
         try:
-            imu_xmp = read_xmp_imu(path)
+            imu_xmp = _read_xmp_imu(path)
             if imu_xmp:
                 imu.update(imu_xmp)
         except ExempiLoadError:
@@ -210,18 +103,12 @@ def get_imu_orientation(path):
         except Exception:
             pass
 
-    if not imu:
+    if imu.get("yaw_deg") is None or imu.get("pitch_deg") is None or imu.get("roll_deg") is None:
         raise ValueError("No IMU orientation found in EXIF or XMP")
 
-    yaw_deg = imu.get("yaw_deg")
-    pitch_deg = imu.get("pitch_deg")
-    roll_deg = imu.get("roll_deg")
-    if yaw_deg is None or pitch_deg is None or roll_deg is None:
-        raise ValueError("Incomplete IMU data; need yaw_deg, pitch_deg, roll_deg")
-
-    yaw = math.radians(yaw_deg)
-    pitch = math.radians(pitch_deg)
-    roll = math.radians(roll_deg)
+    yaw = math.radians(imu["yaw_deg"])
+    pitch = math.radians(imu["pitch_deg"])
+    roll = math.radians(imu["roll_deg"])
     return yaw, pitch, roll
 
 
