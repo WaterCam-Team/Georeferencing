@@ -167,7 +167,10 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
                      outlier_threshold_px: float = 2.0,
                      use_rational_model: bool = False,
                      max_outlier_rounds: int = 3,
-                     camera_height_m: Optional[float] = None) -> CameraIntrinsics:
+                     camera_height_m: Optional[float] = None,
+                     board_w: Optional[int] = None,
+                     board_h: Optional[int] = None,
+                     square_size_m: Optional[float] = None) -> CameraIntrinsics:
     """
     STEP 3: Detect checkerboard corners in all images and compute intrinsics.
 
@@ -185,13 +188,22 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
       - Move the board to different positions: corners, center, edges of frame.
       - Ensure SQUARE_SIZE_M is exact (measure with a ruler).
       - Keep board flat and rigid; avoid motion blur and uneven lighting.
-      Aim for RMS < 1.0 pixel. If higher: add more varied poses or enable
-      reject_outliers to drop bad frames.
+    Aim for RMS < 1.0 pixel. If higher: add more varied poses or enable
+    reject_outliers to drop bad frames.
+
+    board_w, board_h, square_size_m:
+        If provided, override module-level BOARD_W, BOARD_H, SQUARE_SIZE_M
+        (interior corners and square size in metres).
     """
+    bw = int(board_w) if board_w is not None else BOARD_W
+    bh = int(board_h) if board_h is not None else BOARD_H
+    sq = float(square_size_m) if square_size_m is not None else SQUARE_SIZE_M
+    board_size = (bw, bh)
+
     # 3D object points for one board image (Z=0 since board is flat)
-    objp = np.zeros((BOARD_W * BOARD_H, 3), np.float32)
-    objp[:, :2] = np.mgrid[0:BOARD_W, 0:BOARD_H].T.reshape(-1, 2)
-    objp *= SQUARE_SIZE_M
+    objp = np.zeros((bw * bh, 3), np.float32)
+    objp[:, :2] = np.mgrid[0:bw, 0:bh].T.reshape(-1, 2)
+    objp *= sq
 
     objpoints = []  # 3D points in world space
     imgpoints = []  # 2D points in image space
@@ -212,7 +224,7 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         img_size = (gray.shape[1], gray.shape[0])  # (width, height)
 
-        found, corners = cv2.findChessboardCorners(gray, BOARD_SIZE, None)
+        found, corners = cv2.findChessboardCorners(gray, board_size, None)
 
         if found:
             # Refine corner positions to sub-pixel accuracy
@@ -222,7 +234,7 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
             valid_paths.append(path)
 
             if show_corners:
-                vis = cv2.drawChessboardCorners(img.copy(), BOARD_SIZE, corners_refined, found)
+                vis = cv2.drawChessboardCorners(img.copy(), board_size, corners_refined, found)
                 cv2.imshow("Detected Corners", vis)
                 cv2.waitKey(200)
             print(f"  ✓ {Path(path).name}")
