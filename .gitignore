@@ -217,3 +217,54 @@ calibration_captures/
 *.pth
 sam2_*/
 sam_checkpoints/
+
+# --- secrets ---
+planet-api.txt
+
+# --- generated output directories ---
+output/
+sharp_output/
+test_out/
+usable/
+
+# --- raster / point-cloud data files ---
+*.img
+*.ply
+*.copc.laz
+*.aux.xml
+
+# --- archives and source tarballs ---
+*.zip
+*.tar
+*.tar.gz
+PDAL-*/
+
+# --- Pix4DCatch scan directories (timestamp-named, stored separately) ---
+[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*/
+
+# --- field photos and calibration images ---
+*.jpg
+*.jpeg
+*.png
+calib_images*/
+OldCheckerboardPhotos/
+Pixel3a/
+Porch/
+Calibration Photos*/
+
+# --- PDFs ---
+*.pdf
+
+# --- geospatial data files ---
+*.geojson
+Meadowbrook-*.json
+UFO2.json
+ufo2.json
+*_psscene_*/
+
+# --- working notes ---
+georef_tasks.md
+georef_workplan.md
+
+# --- generated viewer HTML ---
+*_viewer.html
