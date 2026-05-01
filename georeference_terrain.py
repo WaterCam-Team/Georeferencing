@@ -533,6 +533,8 @@ class TerrainGeoreferencer:
         camera_lon: float,
         camera_elev_m: float,
         get_elevation: Callable[[float, float], Optional[float]],
+        preloaded_gcps: Optional[list] = None,
+        aruco_dict_name: Optional[str] = None,
     ):
         self.orig_image = image.copy()
         self.K = K
@@ -557,6 +559,33 @@ class TerrainGeoreferencer:
             self.K_undist[0, 2] -= x
             self.K_undist[1, 2] -= y
         self.display = self.undist_image.copy()
+        # Scale font to image width so text is legible at any resolution.
+        # 1.0 at 2592 px wide; proportionally larger/smaller for other sizes.
+        h_img, w_img = self.undist_image.shape[:2]
+        self._fs = max(0.6, w_img / 2592.0) * 1.6   # base scale
+        self._fs_sm = self._fs * 0.75                 # smaller labels
+        self._lw = max(1, round(self._fs))            # line thickness
+
+        # ArUco detection on the already-undistorted image (coords match K_undist space)
+        self._aruco_detections: dict = {}
+        if aruco_dict_name:
+            try:
+                import aruco_gcp as _agcp
+                detector = _agcp._make_detector(aruco_dict_name)
+                corners, ids, _ = detector.detectMarkers(self.undist_image)
+                if ids is not None:
+                    for i, mid in enumerate(ids.flatten()):
+                        cx, cy = _agcp._marker_centre(corners[i])
+                        self._aruco_detections[int(mid)] = {"center_uv": (cx, cy)}
+                n = len(self._aruco_detections)
+                print(f"[ArUco] {n} marker{'s' if n != 1 else ''} detected in photo")
+            except Exception as e:
+                print(f"[ArUco] Detection failed: {e}")
+
+        # Pre-load GCPs (e.g. from aruco_gcp.py CSV output)
+        if preloaded_gcps:
+            self.points.extend(preloaded_gcps)
+            print(f"[GCP] Pre-loaded {len(preloaded_gcps)} GCPs")
 
     def _on_mouse(self, event, u, v, *_):
         if event != cv2.EVENT_LBUTTONDOWN:
@@ -614,29 +643,41 @@ class TerrainGeoreferencer:
 
     def _redraw(self):
         self.display = self.undist_image.copy()
+        # Overlay ArUco-detected markers (cyan cross + ID label)
+        r_a = max(10, round(self._fs * 8))
+        for mid, det in self._aruco_detections.items():
+            u_a, v_a = int(det["center_uv"][0]), int(det["center_uv"][1])
+            cv2.drawMarker(self.display, (u_a, v_a), (0, 255, 255),
+                           cv2.MARKER_CROSS, r_a * 2, self._lw + 1)
+            cv2.putText(self.display, f"A{mid}",
+                        (u_a + r_a + 2, v_a - 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, self._fs_sm, (0, 255, 255), self._lw)
+        r = max(6, round(self._fs * 5))
         for pt in self.points:
-            u, v = pt["u"], pt["v"]
-            cv2.circle(self.display, (u, v), 6, (0, 255, 0), -1)
+            u, v = int(pt["u"]), int(pt["v"])
+            cv2.circle(self.display, (u, v), r, (0, 255, 0), -1)
             sr = pt.get("slant_range_m")
             dist_txt = f" {sr:.0f}m" if sr is not None else ""
             cv2.putText(
                 self.display,
                 f"{pt['lat']:.5f}, {pt['lon']:.5f} {pt['elev']:.1f}m{dist_txt}",
-                (u + 8, v - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1,
+                (u + r + 4, v - 4), cv2.FONT_HERSHEY_SIMPLEX, self._fs_sm, (0, 255, 0), self._lw,
             )
         if self.pending:
-            u, v = self.pending["u"], self.pending["v"]
-            cv2.circle(self.display, (u, v), 6, (0, 165, 255), -1)
+            u, v = int(self.pending["u"]), int(self.pending["v"])
+            cv2.circle(self.display, (u, v), r, (0, 165, 255), -1)
             sr = self.pending.get("slant_range_m")
             if sr is not None:
                 cv2.putText(
                     self.display, f"slant range ~{sr:.0f} m",
-                    (u + 8, v - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 165, 255), 1,
+                    (u + r + 4, v - 4), cv2.FONT_HERSHEY_SIMPLEX, self._fs_sm, (0, 165, 255), self._lw,
                 )
-            cv2.putText(self.display, f"Right-click to label",
-                        (u + 8, v + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 165, 255), 1)
+            line_h = round(self._fs_sm * 28)
+            cv2.putText(self.display, "Right-click to label",
+                        (u + r + 4, v + line_h), cv2.FONT_HERSHEY_SIMPLEX, self._fs_sm, (0, 165, 255), self._lw)
+        (_, txt_h), _ = cv2.getTextSize("A", cv2.FONT_HERSHEY_SIMPLEX, self._fs, self._lw)
         cv2.putText(self.display, f"Points: {len(self.points)}  S=save  Q=quit",
-                    (10, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
+                    (10, txt_h + 8), cv2.FONT_HERSHEY_SIMPLEX, self._fs, (255, 255, 255), self._lw)
         cv2.imshow("Terrain Georeferencer", self.display)
 
     def _on_rbutton(self, event, u, v, *_):
@@ -669,7 +710,11 @@ class TerrainGeoreferencer:
 
     def run(self, output_csv: str = "terrain_georeferenced_points.csv"):
         cv2.namedWindow("Terrain Georeferencer", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Terrain Georeferencer", 1200, 800)
+        h_img, w_img = self.undist_image.shape[:2]
+        # Default window to 80% of a 1920×1080 screen, preserving aspect ratio
+        win_w = min(1536, w_img)
+        win_h = min(864, round(win_w * h_img / w_img))
+        cv2.resizeWindow("Terrain Georeferencer", win_w, win_h)
 
         def mouse(event, u, v, flags, param):
             self._on_mouse(event, u, v, flags, param)
@@ -754,12 +799,13 @@ def main() -> int:
     p.add_argument("--las", default=None, help="Path to LAS/LAZ point cloud")
     p.add_argument("--las-crs", type=int, default=None, help="EPSG for LAS (e.g. 32618)")
     p.add_argument("--las-resolution", type=float, default=1.0, help="LAS raster resolution (m)")
-    p.add_argument("--calibration", "-c", default="./calibration.json", help="Calibration JSON")
+    p.add_argument("--calibration", "-c", default=None,
+                   help="Calibration JSON (default: from unit config, else ./calibration.json)")
     p.add_argument("--lat", type=float, default=None, help="Camera latitude (decimal degrees)")
     p.add_argument("--lon", type=float, default=None, help="Camera longitude")
     p.add_argument("--elev", type=float, default=None, help="Camera elevation (m). See --camera-elev-datum.")
     p.add_argument("--height-above-ground", type=float, default=None,
-                   help="Mount height above ground (m). If set with DEM/LAS, elev = terrain at camera + this.")
+                   help="Mount height above ground (m). Overrides unit config mount_height_m.")
     _VERT_CHOICES = [
         VERTICAL_EGM96,
         VERTICAL_EGM2008,
@@ -770,13 +816,22 @@ def main() -> int:
                    choices=_VERT_CHOICES,
                    help="Vertical datum of DEM/LAS heights (from dataset docs if not in GeoTIFF). "
                         "Default: infer from DEM tags if possible, else egm96 (see startup warning).")
-    p.add_argument("--camera-elev-datum", default=VERTICAL_ELLIPSOID,
+    p.add_argument("--camera-elev-datum", default=None,
                    choices=_VERT_CHOICES,
-                   help="Vertical datum of --elev / EXIF altitude (default: wgs84_ellipsoid).")
-    p.add_argument("--heading", type=float, default=0.0, help="Camera heading (deg, 0=N)")
-    p.add_argument("--pitch", type=float, default=0.0, help="Camera pitch (deg, negative=down)")
-    p.add_argument("--roll", type=float, default=0.0, help="Camera roll (deg)")
+                   help="Vertical datum of --elev / EXIF altitude (default: from unit config, else wgs84_ellipsoid).")
+    p.add_argument("--heading", type=float, default=None,
+                   help="Camera heading (deg, 0=N). Overrides unit config and EXIF.")
+    p.add_argument("--pitch", type=float, default=None,
+                   help="Camera pitch (deg, negative=down). Overrides unit config and EXIF.")
+    p.add_argument("--roll", type=float, default=None,
+                   help="Camera roll (deg). Overrides unit config and EXIF.")
     p.add_argument("--output-csv", "-o", default="./terrain_georeferenced_points.csv")
+    p.add_argument("--gcps", default=None,
+                   help="GCP CSV from aruco_gcp.py to pre-load (label,pixel_u,pixel_v,lat,lon,elev_m,...)")
+    p.add_argument("--aruco-dict", default=None,
+                   help="ArUco dictionary for marker overlay, e.g. DICT_4X4_50")
+    import unit_config as _uc
+    _uc.add_argument(p)
     args = p.parse_args()
 
     image_path = args.image
@@ -818,17 +873,59 @@ def main() -> int:
             "to avoid relying on a default."
         )
 
-    K, D = _load_intrinsics(args.calibration, w, h)
+    import unit_config as _uc
+    ucfg = _uc.from_args(args)
+    ucfg_dir = os.path.dirname(os.path.abspath(args.unit_config)) if args.unit_config else "."
+
+    # Resolve calibration: CLI > unit config > default
+    calib_path = ucfg.resolve_calibration(args.calibration, ucfg_dir)
+    K, D = _load_intrinsics(calib_path, w, h)
+
+    # Read EXIF GPS and IMU
     exif_altitude = None
+    exif_yaw = None
+    exif_pitch = None
+    exif_roll = None
     if _HAS_GEOREF_TOOL:
         if args.lat is None or args.lon is None:
             gps = read_gps_from_exif(image_path)
             args.lat = args.lat or gps.get("lat")
             args.lon = args.lon or gps.get("lon")
             exif_altitude = gps.get("altitude")
-            if gps.get("heading") is not None:
-                args.heading = gps["heading"]
-    R = build_rotation_matrix(args.heading, args.pitch, args.roll)
+            exif_yaw = gps.get("heading")
+
+    # Also read pitch/roll from EXIF UserComment (add_imu.py / SU-WaterCam format)
+    try:
+        from exif_imu import read_gps_imu_from_exif
+        imu = read_gps_imu_from_exif(image_path)
+        if imu.get("pitch_deg") is not None:
+            exif_pitch = imu["pitch_deg"]
+        if imu.get("roll_deg") is not None:
+            exif_roll = imu["roll_deg"]
+        if exif_yaw is None and imu.get("yaw_deg") is not None:
+            exif_yaw = imu["yaw_deg"]
+    except Exception:
+        pass
+
+    # Resolve orientation: CLI > unit config > EXIF > 0
+    heading, h_src = ucfg.resolve_heading(args.heading, exif_yaw)
+    pitch,   p_src = ucfg.resolve_pitch(args.pitch, exif_pitch)
+    roll,    r_src = ucfg.resolve_roll(args.roll, exif_roll)
+    print(f"[POSE] heading={heading:.2f}° ({h_src})  pitch={pitch:.2f}° ({p_src})  roll={roll:.2f}° ({r_src})")
+
+    # Write back so downstream args.heading/pitch/roll references stay consistent
+    args.heading, args.pitch, args.roll = heading, pitch, roll
+
+    # Resolve mount height: CLI > unit config > None (will use EXIF altitude path)
+    mount_h, mh_src = ucfg.resolve_mount_height(args.height_above_ground)
+    if mount_h is not None and args.height_above_ground is None:
+        args.height_above_ground = mount_h
+        print(f"[POSE] mount height={mount_h:.4f} m ({mh_src})")
+
+    # Resolve camera elevation datum: CLI > unit config > wgs84_ellipsoid
+    args.camera_elev_datum = ucfg.resolve_camera_elev_datum(args.camera_elev_datum)
+
+    R = build_rotation_matrix(heading, pitch, roll)
 
     if args.lat is None or args.lon is None:
         print("Set camera position: --lat and --lon (or use an image with EXIF GPS)")
@@ -924,6 +1021,25 @@ def main() -> int:
                 "Many clicks can return no intersection. Prefer --height-above-ground."
             )
 
+    # Load pre-computed GCPs from CSV (e.g. output of aruco_gcp.py)
+    preloaded_gcps = []
+    if args.gcps:
+        if not os.path.exists(args.gcps):
+            print(f"[GCP] File not found: {args.gcps}")
+        else:
+            with open(args.gcps, newline="") as _gf:
+                for _row in csv.DictReader(_gf):
+                    preloaded_gcps.append({
+                        "label":         _row["label"],
+                        "u":             float(_row["pixel_u"]),
+                        "v":             float(_row["pixel_v"]),
+                        "lat":           float(_row["lat"]),
+                        "lon":           float(_row["lon"]),
+                        "elev":          float(_row["elev_m"]),
+                        "slant_range_m": None,
+                    })
+            print(f"[GCP] Loaded {len(preloaded_gcps)} GCPs from {args.gcps}")
+
     tool = TerrainGeoreferencer(
         image=image,
         K=K, D=D, R=R,
@@ -931,6 +1047,8 @@ def main() -> int:
         camera_lon=args.lon,
         camera_elev_m=args.elev,
         get_elevation=get_elevation,
+        preloaded_gcps=preloaded_gcps or None,
+        aruco_dict_name=args.aruco_dict,
     )
     tool.run(output_csv=args.output_csv)
     return 0
