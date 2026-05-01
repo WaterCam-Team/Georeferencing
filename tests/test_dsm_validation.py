@@ -287,7 +287,7 @@ class TestDSMProperties:
 
     def test_dsm_elevation_range_plausible(self):
         """
-        Ellipsoidal heights at this site are ~109-113 m.
+        Orthometric (NAVD88) heights at this site are ~143-148 m.
         If the range is wildly outside this, the UTM shift or datum is wrong.
         """
         rasterio = pytest.importorskip("rasterio")
@@ -297,11 +297,11 @@ class TestDSMProperties:
         valid = data[data != nd]
         z_min, z_max, z_mean = valid.min(), valid.max(), valid.mean()
         print(f"\n  DSM z: {z_min:.2f}–{z_max:.2f} m  mean={z_mean:.2f} m")
-        assert 100.0 < z_min, (
-            f"DSM min elevation {z_min:.2f} m unexpectedly low — check UTM shift"
+        assert 130.0 < z_min, (
+            f"DSM min elevation {z_min:.2f} m unexpectedly low — check UTM shift or geoid correction"
         )
-        assert z_max < 125.0, (
-            f"DSM max elevation {z_max:.2f} m unexpectedly high — check UTM shift"
+        assert z_max < 160.0, (
+            f"DSM max elevation {z_max:.2f} m unexpectedly high — check UTM shift or geoid correction"
         )
 
     def test_dsm_has_sufficient_valid_cells(self):
@@ -350,13 +350,15 @@ class TestDSMProperties:
         from pix4d_to_las_dem import (
             _load_scene_reference_frame,
             _read_gltf_pointcloud,
+            _read_geoid_separation,
             _local_to_utm,
             _write_dem,
         )
 
         shift, crs_wkt = _load_scene_reference_frame(SCAN_DIR)
         xyz_local, _ = _read_gltf_pointcloud(SCAN_DIR)
-        xyz_utm = _local_to_utm(xyz_local, shift)
+        geoid_sep = _read_geoid_separation(SCAN_DIR)
+        xyz_utm = _local_to_utm(xyz_local, shift, geoid_sep=geoid_sep)
         res = 0.05
 
         with tempfile.NamedTemporaryFile(suffix="_max_tmp.tif", delete=False) as f:
@@ -409,7 +411,19 @@ class TestCameraPosesAboveDSM:
     Each camera's GPS altitude (ellipsoidal) must be above the DSM surface
     at that horizontal position.  If it is not, the coordinate transform or
     datum handling is broken.
+
+    Camera poses carry ellipsoidal altitudes; the DSM uses NAVD88 orthometric.
+    Geoid separation N is read from rtkGPS.csv and applied:
+        alt_ortho = alt_ellipsoid - N   (N ≈ -34.43 m for Syracuse NY)
     """
+
+    @pytest.fixture(scope="class")
+    def geoid_sep(self):
+        """Mean geoid separation N from rtkGPS.csv, or 0.0 if unavailable."""
+        sys.path.insert(0, str(SCRIPTS))
+        from pix4d_to_las_dem import _read_geoid_separation
+        val = _read_geoid_separation(SCAN_DIR)
+        return val if val is not None else 0.0
 
     @pytest.fixture(scope="class")
     def poses(self):
@@ -450,7 +464,7 @@ class TestCameraPosesAboveDSM:
 
         return sample
 
-    def test_all_cameras_above_dsm(self, poses, dsm_sampler):
+    def test_all_cameras_above_dsm(self, poses, dsm_sampler, geoid_sep):
         below = []
         outside = 0
         heights = []
@@ -459,15 +473,18 @@ class TestCameraPosesAboveDSM:
             if dsm_z is None:
                 outside += 1
                 continue
-            h = p["alt"] - dsm_z
+            alt_ortho = p["alt"] - geoid_sep
+            h = alt_ortho - dsm_z
             heights.append(h)
             if h < 0:
-                below.append((p["lat"], p["lon"], p["alt"], dsm_z, h))
+                below.append((p["lat"], p["lon"], p["alt"], alt_ortho, dsm_z, h))
 
         assert len(heights) > 0, "No camera poses fell within DSM extent"
         h_arr = np.array(heights)
         print(
             f"\n  Cameras sampled: {len(heights)}  outside DSM: {outside}\n"
+            f"  Geoid sep N={geoid_sep:.3f} m  "
+            f"(alt_ortho = alt_ellipsoid - N)\n"
             f"  Height above DSM: min={h_arr.min():.2f} m  "
             f"mean={h_arr.mean():.2f} m  max={h_arr.max():.2f} m\n"
             f"  Cameras below DSM surface: {len(below)}"
@@ -475,20 +492,22 @@ class TestCameraPosesAboveDSM:
         assert len(below) == 0, (
             f"{len(below)} camera(s) appear below the DSM surface — "
             f"first offender: lat={below[0][0]:.6f}, lon={below[0][1]:.6f}, "
-            f"cam_alt={below[0][2]:.2f} m, dsm_z={below[0][3]:.2f} m, "
-            f"diff={below[0][4]:.2f} m"
+            f"cam_alt_ellip={below[0][2]:.2f} m, cam_alt_ortho={below[0][3]:.2f} m, "
+            f"dsm_z={below[0][4]:.2f} m, diff={below[0][5]:.2f} m"
         )
 
-    def test_camera_height_above_ground_is_realistic(self, poses, dsm_sampler):
+    def test_camera_height_above_ground_is_realistic(self, poses, dsm_sampler, geoid_sep):
         """
         Pix4DCatch is handheld close-range scanning; expect 0.5–10 m above surface.
         Heights outside this range suggest a datum or scale error.
+        Camera altitudes are ellipsoidal; geoid_sep converts to orthometric for comparison.
         """
         heights = []
         for p in poses:
             dsm_z = dsm_sampler(p["lat"], p["lon"])
             if dsm_z is not None:
-                heights.append(p["alt"] - dsm_z)
+                alt_ortho = p["alt"] - geoid_sep
+                heights.append(alt_ortho - dsm_z)
 
         assert len(heights) > 0
         h_arr = np.array(heights)
