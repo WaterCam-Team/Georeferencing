@@ -11,12 +11,34 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import struct
 import sys
 from pathlib import Path
 
 import numpy as np
+
+
+def _read_geoid_separation(scan_dir: Path) -> float | None:
+    """
+    Return mean geoid undulation N (metres) from rtkGPS.csv, or None if unavailable.
+
+    N = GPSAltitude - ReferenceAltitude (ellipsoidal minus orthometric).
+    To convert point cloud Z from ellipsoidal to orthometric: Z_ortho = Z_ellip - N.
+    For Syracuse NY, N ≈ -34.43 m, so orthometric = ellipsoidal + 34.43 m.
+    """
+    rtk_path = scan_dir / "geolocations" / "rtkGPS.csv"
+    if not rtk_path.exists():
+        return None
+    seps = []
+    with open(rtk_path, newline="") as f:
+        for row in csv.DictReader(f):
+            try:
+                seps.append(float(row["GeoidSeparation"]))
+            except (KeyError, ValueError):
+                continue
+    return float(np.mean(seps)) if seps else None
 
 
 def _load_scene_reference_frame(scan_dir: Path):
@@ -70,9 +92,21 @@ def _read_gltf_pointcloud(scan_dir: Path):
     return xyz_local, rgb_uint8
 
 
-def _local_to_utm(xyz_local: np.ndarray, shift: np.ndarray) -> np.ndarray:
-    """utm_xyz = local_xyz - shift  (shift is base_to_canonical.shift)."""
-    return xyz_local - shift
+def _local_to_utm(xyz_local: np.ndarray, shift: np.ndarray,
+                  geoid_sep: float | None = None) -> np.ndarray:
+    """
+    Convert local scene XYZ to UTM XYZ.
+
+    utm_xyz = local_xyz - shift  (shift is base_to_canonical.shift).
+    If geoid_sep (N, ellipsoidal minus orthometric) is provided, the Z column
+    is corrected from ellipsoidal to NAVD88-approximate orthometric:
+        Z_ortho = Z_ellip - N
+    """
+    xyz_utm = xyz_local - shift
+    if geoid_sep is not None:
+        xyz_utm = xyz_utm.copy()
+        xyz_utm[:, 2] -= geoid_sep
+    return xyz_utm
 
 
 def _write_laz(xyz_utm: np.ndarray, rgb: np.ndarray, crs_wkt: str, out_path: Path):
@@ -267,10 +301,16 @@ def process_scan(scan_dir: Path, out_dir: Path, dem_res: float, dsm_method: str 
     shift, crs_wkt = _load_scene_reference_frame(scan_dir)
     print(f"  CRS: NAD83(2011)/UTM18N  shift: {shift.tolist()}")
 
+    geoid_sep = _read_geoid_separation(scan_dir)
+    if geoid_sep is not None:
+        print(f"  Geoid separation N={geoid_sep:.3f} m  → Z corrected to orthometric")
+    else:
+        print("  Warning: rtkGPS.csv not found; Z remains ellipsoidal", file=sys.stderr)
+
     xyz_local, rgb = _read_gltf_pointcloud(scan_dir)
     print(f"  Points read: {len(xyz_local):,}")
 
-    xyz_utm = _local_to_utm(xyz_local, shift)
+    xyz_utm = _local_to_utm(xyz_local, shift, geoid_sep=geoid_sep)
 
     laz_path = out_dir / f"{scan_name}.laz"
     _write_laz(xyz_utm, rgb, crs_wkt, laz_path)
