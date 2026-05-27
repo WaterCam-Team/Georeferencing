@@ -17,7 +17,6 @@ from __future__ import annotations
 import argparse
 import base64
 import json
-import struct
 import sys
 from pathlib import Path
 
@@ -114,14 +113,14 @@ def export(scan_dir: Path, out_dir: Path, max_points: int) -> None:
         "scene_dims": scene_dims,
         "pos_b64": pos_b64,
         "col_b64": col_b64,
-    }))
+    }), encoding="utf-8")
     print(f"  Data:  {data_path}  ({data_path.stat().st_size / 1e6:.1f} MB)")
 
     meta_path = out_dir / f"{session_id}.meta.json"
     meta_path.write_text(json.dumps({
         "points": n_points,
         "scene_dims": scene_dims,
-    }, indent=2))
+    }, indent=2), encoding="utf-8")
     print(f"  Meta:  {meta_path}")
 
 
@@ -133,6 +132,10 @@ def main():
     ap.add_argument("--max-points", type=int, default=300_000,
                     help="Maximum points to include (default: 300000)")
     args = ap.parse_args()
+
+    if args.max_points < 1:
+        print("ERROR: --max-points must be >= 1", file=sys.stderr)
+        sys.exit(1)
 
     scan_dir = Path(args.scan_dir).resolve()
     if not scan_dir.is_dir():
