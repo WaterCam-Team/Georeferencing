@@ -446,17 +446,22 @@ def run_calibration_procedure(imu: BNO055,
         print("    - Move SLOWLY and SMOOTHLY -- fast motion does not help")
         print("    - Stay at least 30 cm away from metal objects and cables")
         print("    - Do this at the deployment site, not at a workbench")
-        print("    - Keep rotating until status reaches 3")
+        print("    - Keep rotating for at least 30 seconds even if status hits 3 early")
         print()
         input("  Press Enter when you are ready to begin rotating > ")
         print()
         print("  Rotating -- keep moving in a figure-eight...")
 
+        MIN_ROTATE_S = 30
+        rotate_start = time.monotonic()
         while True:
-            s = imu.calibration_status()
-            print(f"\r  mag = {s['mag']}/3  sys = {s['system']}/3  ",
+            s       = imu.calibration_status()
+            elapsed = time.monotonic() - rotate_start
+            remaining = max(0, MIN_ROTATE_S - elapsed)
+            print(f"\r  mag = {s['mag']}/3  sys = {s['system']}/3  "
+                  f"  elapsed = {elapsed:.0f}s  (min {remaining:.0f}s left)  ",
                   end="", flush=True)
-            if s["mag"] == 3:
+            if s["mag"] == 3 and elapsed >= MIN_ROTATE_S:
                 break
             time.sleep(0.2)
         print("\n  Magnetometer calibrated.\n")
