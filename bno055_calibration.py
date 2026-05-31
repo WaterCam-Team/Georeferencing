@@ -272,8 +272,8 @@ def save_calibration(imu: BNO055, path: str = CALIB_FILE,
                   Syracuse NY is approximately -12.5° (as of 2025).
                   Add this value to BNO055 heading readings to get true North.
     """
+    status  = imu.calibration_status()   # read BEFORE mode switch in read_offsets()
     offsets = imu.read_offsets()
-    status  = imu.calibration_status()
 
     data = {
         "node_id":             node_id,
@@ -463,6 +463,7 @@ def run_calibration_procedure(imu: BNO055,
 
         # ── COMPLETE ──────────────────────────────────────────────────────────
         print("─"*60)
+        time.sleep(0.5)   # let sys flag catch up after final sub-system hits 3
         s = imu.calibration_status()
         print(f"All sub-systems fully calibrated.")
         print(f"  sys={s['system']}  gyro={s['gyro']}  "
