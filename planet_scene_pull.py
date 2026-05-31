@@ -34,7 +34,6 @@ except ImportError:
 def _to_decimal(dms, ref):
     """Convert DMS tuple from EXIF to signed decimal degrees."""
     deg, mn, sec = dms
-    # Pillow may return IFDRational objects; coerce to float
     deg, mn, sec = float(deg), float(mn), float(sec)
     decimal = deg + mn / 60 + sec / 3600
     if ref in ("S", "W"):
@@ -63,7 +62,6 @@ def extract_gps(image_path):
     lat = _to_decimal(gps["GPSLatitude"], gps["GPSLatitudeRef"])
     lon = _to_decimal(gps["GPSLongitude"], gps["GPSLongitudeRef"])
 
-    # Try to get capture datetime from standard EXIF
     dt = None
     for tag in ("DateTimeOriginal", "DateTime", "DateTimeDigitized"):
         raw = exif.get(tag)
@@ -86,14 +84,13 @@ def extract_gps(image_path):
 PLANET_API_BASE = "https://api.planet.com/data/v1"
 
 
-def build_search_filter(lat, lon, radius_m, date_start, date_end):
+def build_search_filter(lat, lon, radius_m, date_start, date_end, cloud_cover_max=0.20):
     """
     Construct a Planet API AndFilter combining:
       - geometry (point with buffer approximated as bounding box)
       - date range
-      - cloud cover < 20%
+      - cloud cover <= cloud_cover_max
     """
-    # Rough degree offset for radius_m at the given latitude
     import math
     lat_deg = radius_m / 111_320
     lon_deg = radius_m / (111_320 * math.cos(math.radians(lat)))
@@ -128,22 +125,23 @@ def build_search_filter(lat, lon, radius_m, date_start, date_end):
             {
                 "type": "RangeFilter",
                 "field_name": "cloud_cover",
-                "config": {"lte": 0.20}
+                "config": {"lte": cloud_cover_max}
             }
         ]
     }
 
 
 def search_scenes(api_key, lat, lon, radius_m, date_start, date_end,
-                  item_types=None, limit=10):
+                  item_types=None, limit=10, cloud_cover_max=0.20):
     """
     Run a quick-search against the Planet Data API.
     Returns a list of scene feature dicts.
     """
     if item_types is None:
-        item_types = ["PSScene"]  # PlanetScope 4-/8-band
+        item_types = ["PSScene"]
 
-    filt = build_search_filter(lat, lon, radius_m, date_start, date_end)
+    filt = build_search_filter(lat, lon, radius_m, date_start, date_end,
+                               cloud_cover_max=cloud_cover_max)
 
     payload = {
         "item_types": item_types,
@@ -163,27 +161,137 @@ def search_scenes(api_key, lat, lon, radius_m, date_start, date_end,
     return data.get("features", [])
 
 
+# ---------------------------------------------------------------------------
+# Post-search filtering and scoring
+# ---------------------------------------------------------------------------
+
+def _parse_month_range(spec):
+    """
+    Parse 'START-END' month range string into a set of month numbers (1–12).
+    Handles wrap-around: '11-2' -> {11, 12, 1, 2}.
+    Returns None if spec is None.
+    """
+    if spec is None:
+        return None
+    parts = spec.strip().split("-")
+    if len(parts) != 2:
+        raise ValueError(
+            f"--month-range must be START-END (e.g. 5-9 or 11-2), got: {spec!r}"
+        )
+    try:
+        start, end = int(parts[0]), int(parts[1])
+    except ValueError:
+        raise ValueError(
+            f"--month-range months must be integers, got: {spec!r}"
+        )
+    if not (1 <= start <= 12 and 1 <= end <= 12):
+        raise ValueError(
+            f"--month-range month numbers must be 1–12, got: {spec!r}"
+        )
+    if start <= end:
+        return set(range(start, end + 1))
+    # wrap-around (e.g. Nov–Feb)
+    return set(range(start, 13)) | set(range(1, end + 1))
+
+
+def _month_range_from_photo(photo_dt, window=1):
+    """
+    Derive a ±window-month window from the photo capture month (wrapping).
+    """
+    months = set()
+    for delta in range(-window, window + 1):
+        m = ((photo_dt.month - 1 + delta) % 12) + 1
+        months.add(m)
+    return months
+
+
+def filter_scenes(scenes, *, month_range=None, sun_elevation_min=None):
+    """
+    Return a filtered copy of scenes.
+
+    month_range: set of allowed month numbers (1–12), or None to skip
+    sun_elevation_min: minimum sun elevation in degrees, or None to skip
+    """
+    out = []
+    for s in scenes:
+        props = s.get("properties", {})
+
+        if month_range is not None:
+            acquired_str = props.get("acquired", "")
+            try:
+                acquired_dt = parse_date(acquired_str)
+            except Exception:
+                continue
+            if acquired_dt.month not in month_range:
+                continue
+
+        if sun_elevation_min is not None:
+            sun_el = props.get("sun_elevation")
+            if sun_el is None or float(sun_el) < sun_elevation_min:
+                continue
+
+        out.append(s)
+    return out
+
+
+def score_and_sort_scenes(scenes, photo_dt=None):
+    """
+    Return a sorted copy of scenes.
+
+    Primary key: cloud_cover ascending (lower is better).
+    Secondary key: absolute date distance from photo_dt ascending (when available).
+    Scenes with missing cloud_cover are ranked last.
+    """
+    def _key(s):
+        props = s.get("properties", {})
+        cloud = props.get("cloud_cover")
+        cloud_key = float(cloud) if cloud is not None else 1.0
+
+        date_key = 0.0
+        if photo_dt is not None:
+            acquired_str = props.get("acquired", "")
+            try:
+                acquired_dt = parse_date(acquired_str)
+                if acquired_dt.tzinfo is None:
+                    acquired_dt = acquired_dt.replace(tzinfo=timezone.utc)
+                date_key = abs((acquired_dt - photo_dt).total_seconds())
+            except Exception:
+                date_key = float("inf")
+
+        return (cloud_key, date_key)
+
+    return sorted(scenes, key=_key)
+
+
+# ---------------------------------------------------------------------------
+# Display
+# ---------------------------------------------------------------------------
+
 def print_scene_summary(scenes):
     if not scenes:
         print("No scenes found matching the criteria.")
         return
 
-    print(f"\nFound {len(scenes)} scene(s):\n")
-    for s in scenes:
+    print(f"\nFound {len(scenes)} scene(s) (sorted: cloud cover asc, date proximity asc):\n")
+    for i, s in enumerate(scenes, 1):
         props = s.get("properties", {})
         sid = s.get("id", "unknown")
         acquired = props.get("acquired", "unknown")
         cloud = props.get("cloud_cover", "N/A")
+        sun_el = props.get("sun_elevation", "N/A")
         satellite = props.get("satellite_id", "N/A")
         item_type = props.get("item_type", "N/A")
         gsd = props.get("gsd", "N/A")
 
-        print(f"  ID:          {sid}")
-        print(f"  Type:        {item_type}")
-        print(f"  Acquired:    {acquired}")
-        print(f"  Cloud cover: {cloud:.0%}" if isinstance(cloud, float) else f"  Cloud cover: {cloud}")
-        print(f"  Satellite:   {satellite}")
-        print(f"  GSD (m):     {gsd}")
+        best_tag = " [best]" if i == 1 else ""
+        print(f"  [{i}]{best_tag}")
+        print(f"    ID:           {sid}")
+        print(f"    Type:         {item_type}")
+        print(f"    Acquired:     {acquired}")
+        print(f"    Cloud cover:  {cloud:.0%}" if isinstance(cloud, float) else f"    Cloud cover:  {cloud}")
+        print(f"    Sun elevation:{sun_el:.1f}°" if isinstance(sun_el, float) else f"    Sun elevation:{sun_el}")
+        print(f"    Satellite:    {satellite}")
+        print(f"    GSD (m):      {gsd}")
         print()
 
 
@@ -194,7 +302,7 @@ def save_results(scenes, out_path):
 
 
 # ---------------------------------------------------------------------------
-# Asset download (optional)
+# Asset download
 # ---------------------------------------------------------------------------
 
 def request_activation(api_key, scene_id, asset_type="ortho_analytic_4b"):
@@ -219,10 +327,12 @@ def request_activation(api_key, scene_id, asset_type="ortho_analytic_4b"):
     return assets[asset_type]
 
 
-def download_scene(api_key, scene_id, out_dir, asset_type="ortho_analytic_4b"):
+def download_scene(api_key, scene_id, out_dir, asset_type="ortho_analytic_4b",
+                   poll_timeout=300, poll_interval=15):
     """
     Poll activation status and download once ready.
-    Planet assets typically activate within 1-5 minutes for recent imagery.
+    poll_timeout: maximum seconds to wait (default 300)
+    poll_interval: seconds between polls (default 15)
     """
     import time
 
@@ -230,11 +340,12 @@ def download_scene(api_key, scene_id, out_dir, asset_type="ortho_analytic_4b"):
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"Polling activation for {scene_id}...")
-    for attempt in range(20):
+    max_attempts = max(1, int(poll_timeout / poll_interval))
+    print(f"Polling activation for {scene_id} (timeout {poll_timeout}s)...")
+    for attempt in range(max_attempts):
         assets = requests.get(url, auth=(api_key, ""), timeout=30).json()
         status = assets.get(asset_type, {}).get("status", "unknown")
-        print(f"  [{attempt+1}/20] Status: {status}")
+        print(f"  [{attempt+1}/{max_attempts}] Status: {status}")
 
         if status == "active":
             location = assets[asset_type]["location"]
@@ -248,7 +359,7 @@ def download_scene(api_key, scene_id, out_dir, asset_type="ortho_analytic_4b"):
             print("Download complete.")
             return fname
 
-        time.sleep(15)
+        time.sleep(poll_interval)
 
     print("Asset did not activate within the polling window. Try again later.")
     return None
@@ -261,7 +372,6 @@ def download_scene(api_key, scene_id, out_dir, asset_type="ortho_analytic_4b"):
 def load_api_key(raw):
     """
     Accept either a literal API key string or a path to a file containing one.
-    Strips whitespace and newlines either way.
     """
     if raw is None:
         return None
@@ -282,7 +392,9 @@ def prompt_scene_selection(scenes):
         acquired = props.get("acquired", "unknown")
         cloud = props.get("cloud_cover", "N/A")
         cloud_str = f"{cloud:.0%}" if isinstance(cloud, float) else str(cloud)
-        print(f"  [{i}] {s['id']}  acquired={acquired}  cloud={cloud_str}")
+        sun_el = props.get("sun_elevation", "N/A")
+        sun_str = f"{sun_el:.1f}°" if isinstance(sun_el, float) else str(sun_el)
+        print(f"  [{i}] {s['id']}  acquired={acquired}  cloud={cloud_str}  sun={sun_str}")
 
     print()
     while True:
@@ -326,8 +438,27 @@ def parse_args():
         help="Override end date (ISO format)."
     )
     p.add_argument(
+        "--cloud-cover-max", type=float, default=0.20, metavar="FRAC",
+        help="Maximum cloud cover fraction 0–1 (default: 0.20)"
+    )
+    p.add_argument(
+        "--sun-elevation-min", type=float, default=30.0, metavar="DEG",
+        help="Minimum sun elevation in degrees; scenes below threshold are dropped "
+             "(default: 30.0). Pass 0 to disable."
+    )
+    p.add_argument(
+        "--month-range", default=None, metavar="M-M",
+        help="Restrict to scenes acquired in these months, e.g. 5-9 (May–Sep) or "
+             "11-2 (Nov–Feb). Omit to auto-derive ±1 month from photo date."
+    )
+    p.add_argument(
+        "--item-types", nargs="+", default=["PSScene"], metavar="TYPE",
+        help="Planet item type(s) to search (default: PSScene). "
+             "Example: --item-types PSScene SkySatScene"
+    )
+    p.add_argument(
         "--limit", type=int, default=10,
-        help="Max scenes to return (default: 10)"
+        help="Max scenes to return from API (default: 10)"
     )
     p.add_argument(
         "--save-json", metavar="FILE",
@@ -336,6 +467,11 @@ def parse_args():
     p.add_argument(
         "--download", metavar="SCENE_ID",
         help="Activate and download a specific scene ID without prompting"
+    )
+    p.add_argument(
+        "--auto-best", action="store_true",
+        help="After filtering and ranking, automatically download the best scene "
+             "(lowest cloud cover, closest date). Mutually exclusive with --interactive."
     )
     p.add_argument(
         "--interactive", action="store_true",
@@ -348,6 +484,14 @@ def parse_args():
     p.add_argument(
         "--asset-type", default="ortho_analytic_4b",
         help="Planet asset type to download (default: ortho_analytic_4b)"
+    )
+    p.add_argument(
+        "--poll-timeout", type=int, default=300, metavar="SEC",
+        help="Maximum seconds to wait for asset activation (default: 300)"
+    )
+    p.add_argument(
+        "--poll-interval", type=int, default=15, metavar="SEC",
+        help="Seconds between activation status polls (default: 15)"
     )
     return p.parse_args()
 
@@ -391,7 +535,31 @@ def main():
         date_end = date_start + timedelta(days=args.days_before + args.days_after)
 
     print(f"  Search window: {date_start.date()} to {date_end.date()}")
-    print(f"  Radius: {args.radius} m\n")
+    print(f"  Radius: {args.radius} m")
+    print(f"  Cloud cover max: {args.cloud_cover_max:.0%}")
+
+    # --- Resolve month range ---
+    try:
+        month_range = _parse_month_range(args.month_range)
+    except ValueError as exc:
+        sys.exit(f"Error: {exc}")
+    if month_range is None and photo_dt is not None:
+        month_range = _month_range_from_photo(photo_dt, window=1)
+        month_names = sorted(month_range)
+        print(f"  Month filter (auto ±1 month): {month_names}")
+    elif month_range is not None:
+        print(f"  Month filter (explicit): {sorted(month_range)}")
+    else:
+        print("  Month filter: none")
+
+    # --- Resolve sun elevation ---
+    sun_elevation_min = args.sun_elevation_min if args.sun_elevation_min > 0 else None
+    if sun_elevation_min is not None:
+        print(f"  Sun elevation min: {sun_elevation_min}°")
+    else:
+        print("  Sun elevation filter: disabled")
+
+    print()
 
     # --- Search ---
     print("Querying Planet Data API...")
@@ -402,19 +570,37 @@ def main():
         radius_m=args.radius,
         date_start=date_start,
         date_end=date_end,
+        item_types=args.item_types,
         limit=args.limit,
+        cloud_cover_max=args.cloud_cover_max,
     )
+    print(f"  API returned {len(scenes)} scene(s) within search window.")
+
+    # --- Filter ---
+    scenes = filter_scenes(scenes, month_range=month_range,
+                           sun_elevation_min=sun_elevation_min)
+    if month_range is not None or sun_elevation_min is not None:
+        print(f"  {len(scenes)} scene(s) after month/sun filters.")
+
+    # --- Sort ---
+    scenes = score_and_sort_scenes(scenes, photo_dt=photo_dt)
 
     print_scene_summary(scenes)
 
     if args.save_json:
         save_results(scenes, args.save_json)
 
-    # --- Download: explicit ID, interactive selection, or skip ---
+    # --- Download: explicit ID > auto-best > interactive > skip ---
     scene_to_download = None
 
     if args.download:
         scene_to_download = args.download
+    elif args.auto_best:
+        if scenes:
+            scene_to_download = scenes[0]["id"]
+            print(f"--auto-best: selecting {scene_to_download}")
+        else:
+            print("--auto-best: no scenes available to download.")
     elif args.interactive and scenes:
         selected = prompt_scene_selection(scenes)
         if selected:
@@ -422,7 +608,10 @@ def main():
 
     if scene_to_download:
         request_activation(args.api_key, scene_to_download, args.asset_type)
-        download_scene(args.api_key, scene_to_download, args.download_dir, args.asset_type)
+        download_scene(
+            args.api_key, scene_to_download, args.download_dir, args.asset_type,
+            poll_timeout=args.poll_timeout, poll_interval=args.poll_interval,
+        )
 
 
 if __name__ == "__main__":
