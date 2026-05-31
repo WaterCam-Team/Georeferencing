@@ -354,15 +354,17 @@ def run_calibration_procedure(imu: BNO055,
           this sensor's physical position inside this camera box.
           If the sensor is ever remounted, recalibrate from scratch.
     """
-    # 6 stable orientations covering all faces of the box.
-    # Each must be rested on a flat surface — do not hold in the air.
+    # 6 stable orientations that avoid resting the box on its sides.
+    # Positions 3-6 use ~45° tilts propped against a support (book, wedge, wall)
+    # so the antennas are never load-bearing. Each must be held stationary —
+    # prop securely before pressing Enter.
     ACCEL_POSITIONS = [
-        ("1/6", "Base down  — box sitting normally, base resting on surface"),
-        ("2/6", "Lid down   — flip box completely upside-down"),
-        ("3/6", "Left down  — rotate 90 degrees so left face rests on surface"),
-        ("4/6", "Right down — rotate 90 degrees so right face rests on surface"),
-        ("5/6", "Front down — tilt forward so front face rests on surface"),
-        ("6/6", "Back down  — tilt backward so back face rests on surface"),
+        ("1/6", "Base down     — box sitting normally on its base"),
+        ("2/6", "Lid down      — flip box completely upside-down on its lid"),
+        ("3/6", "Tilt forward  — prop front end down ~45° (e.g. front edge on a book); antennas clear"),
+        ("4/6", "Tilt backward — prop back end down ~45° (e.g. back edge on a book); antennas clear"),
+        ("5/6", "Tilt left     — prop left edge down ~45° on a wedge; antennas point up and away"),
+        ("6/6", "Tilt right    — prop right edge down ~45° on a wedge; antennas point up and away"),
     ]
     HOLD_SECONDS = 5
 
@@ -399,7 +401,9 @@ def run_calibration_procedure(imu: BNO055,
         print()
         print("  You will be guided through 6 positions.")
         print(f"  Hold the box still in each position for {HOLD_SECONDS} seconds.")
-        print("  Rest the box on a surface for each position -- do not hold it.")
+        print("  Positions 1-2: rest box on base/lid.  Positions 3-6: prop at")
+        print("  ~45 degrees using a book or wedge -- do not rest on the sides.")
+        print("  Antennas must remain clear of any load-bearing surface.")
         print()
         input("  Press Enter to begin > ")
 
