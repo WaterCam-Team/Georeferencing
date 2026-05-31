@@ -1,9 +1,13 @@
 """
 drone_dsm_ingest.py
 ===================
-Accept a drone-produced GeoTIFF (DSM or orthophoto) from any tool — DJI Terra,
-Pix4D, OpenDroneMap, DroneDeploy — validate it, reproject to the project CRS
-if needed, and print the ready `georeference_terrain.py` command.
+Accept a drone-produced DSM/DEM GeoTIFF from any tool — DJI Terra, Pix4D,
+OpenDroneMap, DroneDeploy — validate it, reproject to the project CRS if
+needed, and print the ready `georeference_terrain.py` command.
+
+Note: this script validates elevation data (z range, coverage, vertical datum).
+It is not suitable for orthophotos or RGB rasters; use drone_gcp_match.py for
+orthomosaic GCP matching.
 
 Usage
 -----
