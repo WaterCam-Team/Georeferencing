@@ -255,7 +255,11 @@ def score_and_sort_scenes(scenes, photo_dt=None):
                 acquired_dt = parse_date(acquired_str)
                 if acquired_dt.tzinfo is None:
                     acquired_dt = acquired_dt.replace(tzinfo=timezone.utc)
-                date_key = abs((acquired_dt - photo_dt).total_seconds())
+                # Normalise photo_dt to tz-aware so subtraction never raises
+                # TypeError when the caller passes a naive datetime.
+                ref_dt = photo_dt if photo_dt.tzinfo is not None \
+                    else photo_dt.replace(tzinfo=timezone.utc)
+                date_key = abs((acquired_dt - ref_dt).total_seconds())
             except Exception:
                 date_key = float("inf")
 

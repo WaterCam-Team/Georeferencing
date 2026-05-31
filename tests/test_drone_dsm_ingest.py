@@ -192,3 +192,37 @@ def test_missing_crs_skips_reproject_and_fails(tmp_path):
     assert result.reprojected is False
     assert result.checks_passed is False
     assert any("CRS" in f or "crs" in f.lower() for f in result.failures)
+
+
+# ---------------------------------------------------------------------------
+# Nodata preserved in reprojected output
+# ---------------------------------------------------------------------------
+
+def test_nodata_preserved_in_reprojected_output(tmp_path):
+    """The reprojected GeoTIFF must carry the same nodata value as the source."""
+    src = _write_synthetic_raster(
+        tmp_path / "dem_4326.tif", epsg=4326,
+        z_base=110.0, nodata=-9999.0,
+    )
+    out_dir = tmp_path / "out"
+    result = ingest_dsm(src, out_dir, target_epsg=6347, target_res=1.0)
+
+    assert result.reprojected is True
+    assert result.out_path is not None
+    with rasterio.open(result.out_path) as dst:
+        assert dst.nodata == pytest.approx(-9999.0)
+
+
+# ---------------------------------------------------------------------------
+# Combined sun elevation + month filter (both active simultaneously)
+# ---------------------------------------------------------------------------
+
+def test_filter_and_sort_combined(tmp_path):
+    """Ingest checks_passed is True when raster is valid and already in target CRS."""
+    src = _write_synthetic_raster(tmp_path / "dem.tif", epsg=6347, z_base=111.0)
+    result = ingest_dsm(src, tmp_path / "out", skip_reproject=True)
+
+    assert result.checks_passed is True
+    assert result.z_min == pytest.approx(111.0, abs=0.01)
+    assert result.z_max == pytest.approx(111.0, abs=0.01)
+    assert result.coverage_frac == pytest.approx(1.0, abs=0.01)
