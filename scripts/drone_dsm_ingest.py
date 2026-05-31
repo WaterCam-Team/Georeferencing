@@ -119,10 +119,12 @@ def ingest_dsm(
         src_epsg = src_crs.to_epsg() if src_crs else None
 
         raw = src.read(1).astype(np.float64)
-        if nd is not None:
+        if nd is not None and np.isnan(nd):
+            valid_mask = ~np.isnan(raw)
+        elif nd is not None:
             valid_mask = raw != nd
         else:
-            valid_mask = np.ones(raw.shape, dtype=bool)
+            valid_mask = ~np.isnan(raw)  # still exclude NaN even with no declared nodata
         valid = raw[valid_mask]
 
         vertical_hint = (
@@ -163,13 +165,18 @@ def ingest_dsm(
         vertical_hint = VERTICAL_ELLIPSOID
 
     # --- Reprojection decision ---
-    needs_reproject = (src_epsg != target_epsg) if src_epsg is not None else True
+    needs_reproject = (src_epsg != target_epsg) if src_epsg is not None else False
     reprojected = False
     out_path: Optional[Path] = None
     out_res: Optional[float] = None
 
     print("\nReprojection")
-    if skip_reproject:
+    if src_crs is None:
+        _warn("Skipping reprojection — no CRS in source file",
+              "pass a file with an embedded CRS or reproject manually with gdalwarp")
+        failures.append("no CRS; reprojection skipped")
+        out_path = src_path
+    elif skip_reproject:
         print(f"  {INFO}  --skip-reproject: leaving in source CRS")
         out_path = src_path
     elif not needs_reproject:
