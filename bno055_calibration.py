@@ -339,107 +339,135 @@ def run_calibration_procedure(imu: BNO055,
                                node_id: str = "node_1",
                                magnetic_declination_deg: float = 0.0):
     """
-    Interactive calibration procedure.
+    Guided step-by-step calibration procedure.
 
-    The BNO055 calibrates its three sub-systems through specific motions.
-    This function monitors calibration status in real time and prompts
-    you through each stage.
+    Each stage waits for explicit user confirmation before starting.
+    The accelerometer stage walks through all 6 positions with a countdown.
+    The gyroscope and magnetometer stages wait for status = 3.
 
     BEFORE STARTING:
-        - Mount the BNO055 rigidly in the camera box in its final position.
-        - Move well away from large metal objects, motors, and power cables.
-        - The calibration captures hard-iron offsets specific to this mounting.
-
-    GYROSCOPE (fastest, ~5 seconds):
-        Place the camera box on a stable surface and leave it completely still.
-        The gyro calibrates automatically during stillness.
-
-    ACCELEROMETER (moderate, ~1–2 minutes):
-        Place the camera box in 6 different stable orientations:
-        flat, upside-down, on each of its four sides.
-        Hold each position for 3–5 seconds until you feel the accel status
-        increment. You do not need to be precise — any 6 distinct stable
-        orientations covering different gravity vector directions work.
-
-    MAGNETOMETER (most important for heading, ~1–2 minutes):
-        Hold the camera box and rotate it slowly through a figure-eight
-        pattern in the air. This motion samples the local magnetic field
-        from many directions, allowing the sensor to compute hard-iron
-        and soft-iron correction offsets.
-
-        CRITICAL: Do this at the deployment site (or a magnetically similar
-        environment), not at a workbench near computers or power supplies.
-        Large ferromagnetic objects within ~30 cm will corrupt the offsets.
-        Repeat after any significant modification to the camera box hardware.
+        - BNO055 must already be mounted rigidly inside the camera box.
+        - Calibration must be performed at the deployment site (or a
+          magnetically similar outdoor location), not at a workbench near
+          computers, power supplies, or large metal objects.
+        - The hard-iron magnetometer offsets captured here are specific to
+          this sensor's physical position inside this camera box.
+          If the sensor is ever remounted, recalibrate from scratch.
     """
+    # 6 stable orientations covering all faces of the box.
+    # Each must be rested on a flat surface — do not hold in the air.
+    ACCEL_POSITIONS = [
+        ("1/6", "Base down  — box sitting normally, base resting on surface"),
+        ("2/6", "Lid down   — flip box completely upside-down"),
+        ("3/6", "Left down  — rotate 90 degrees so left face rests on surface"),
+        ("4/6", "Right down — rotate 90 degrees so right face rests on surface"),
+        ("5/6", "Front down — tilt forward so front face rests on surface"),
+        ("6/6", "Back down  — tilt backward so back face rests on surface"),
+    ]
+    HOLD_SECONDS = 5
+
     print("\n" + "="*60)
     print("  BNO055 CALIBRATION PROCEDURE")
     print("="*60)
-    print("\nThis will guide you through calibrating all three sub-sensors.")
-    print("Status: 0 = uncalibrated → 3 = fully calibrated\n")
-
-    stages = {
-        "gyro":  {"done": False,
-                  "instruction": "Set the camera box on a stable surface "
-                                 "and leave it completely still."},
-        "accel": {"done": False,
-                  "instruction": "Place the camera box in 6 different stable "
-                                 "orientations (flat, upside-down, each side). "
-                                 "Hold each for ~3 seconds."},
-        "mag":   {"done": False,
-                  "instruction": "Hold the camera box and rotate it slowly "
-                                 "through a figure-eight pattern. Do this at "
-                                 "the deployment site, away from metal objects."},
-    }
-
-    # Show instructions for first stage
-    print(f"STEP 1 — GYROSCOPE\n  {stages['gyro']['instruction']}\n")
+    print(f"\n  Node  : {node_id}")
+    print(f"  Stages: Gyroscope -> Accelerometer -> Magnetometer")
+    print(f"  Status: 0 = uncalibrated, 3 = fully calibrated\n")
 
     try:
+        # ── STAGE 1: GYROSCOPE ────────────────────────────────────────────────
+        print("─"*60)
+        print("STAGE 1/3 -- GYROSCOPE (~5 seconds)")
+        print()
+        print("  Place the camera box on a flat, stable surface.")
+        print("  Do not touch or move the box during this stage.")
+        print()
+        input("  Press Enter when the box is placed and still > ")
+        print()
+
+        print("  Waiting for gyroscope calibration -- keep the box still...")
         while True:
-            status = imu.calibration_status()
-            angles = imu.euler_angles()
-
-            bar = lambda v: "[" + "#"*v + "."*(3-v) + "]"
-            print(f"\r  sys={bar(status['system'])}  "
-                  f"gyro={bar(status['gyro'])}  "
-                  f"accel={bar(status['accel'])}  "
-                  f"mag={bar(status['mag'])}    "
-                  f"hdg={angles['heading']:6.1f}°  "
-                  f"pitch={angles['pitch']:6.1f}°  "
-                  f"roll={angles['roll']:6.1f}°  ",
-                  end="", flush=True)
-
-            # Prompt for next stage when current one completes
-            if not stages["gyro"]["done"] and status["gyro"] == 3:
-                stages["gyro"]["done"] = True
-                print(f"\n\n✓ Gyroscope calibrated.")
-                print(f"\nSTEP 2 — ACCELEROMETER\n  "
-                      f"{stages['accel']['instruction']}\n")
-
-            if not stages["accel"]["done"] and status["accel"] == 3:
-                stages["accel"]["done"] = True
-                print(f"\n\n✓ Accelerometer calibrated.")
-                print(f"\nSTEP 3 — MAGNETOMETER\n  "
-                      f"{stages['mag']['instruction']}\n")
-
-            if not stages["mag"]["done"] and status["mag"] == 3:
-                stages["mag"]["done"] = True
-                print(f"\n\n✓ Magnetometer calibrated.")
-
-            if imu.is_fully_calibrated():
-                print(f"\n\n✓ All sub-systems fully calibrated.")
+            s = imu.calibration_status()
+            print(f"\r  gyro = {s['gyro']}/3  ", end="", flush=True)
+            if s["gyro"] == 3:
                 break
-
             time.sleep(0.2)
+        print("\n  Gyroscope calibrated.\n")
+
+        # ── STAGE 2: ACCELEROMETER ────────────────────────────────────────────
+        print("─"*60)
+        print("STAGE 2/3 -- ACCELEROMETER (~2 minutes)")
+        print()
+        print("  You will be guided through 6 positions.")
+        print(f"  Hold the box still in each position for {HOLD_SECONDS} seconds.")
+        print("  Rest the box on a surface for each position -- do not hold it.")
+        print()
+        input("  Press Enter to begin > ")
+
+        for label, description in ACCEL_POSITIONS:
+            print()
+            print(f"  Position {label}: {description}")
+            input("  Press Enter when the box is in position and stable > ")
+            for remaining in range(HOLD_SECONDS, 0, -1):
+                s = imu.calibration_status()
+                print(f"\r  Holding... {remaining}s   accel = {s['accel']}/3  ",
+                      end="", flush=True)
+                time.sleep(1)
+            s = imu.calibration_status()
+            print(f"\r  Done.       accel = {s['accel']}/3               ")
+
+        s = imu.calibration_status()
+        if s["accel"] < 3:
+            print()
+            print("  Accelerometer not yet at 3. Place the box in additional")
+            print("  orientations (any stable position not already used).")
+            while True:
+                s = imu.calibration_status()
+                print(f"\r  accel = {s['accel']}/3  ", end="", flush=True)
+                if s["accel"] == 3:
+                    break
+                time.sleep(0.2)
+        print("\n  Accelerometer calibrated.\n")
+
+        # ── STAGE 3: MAGNETOMETER ─────────────────────────────────────────────
+        print("─"*60)
+        print("STAGE 3/3 -- MAGNETOMETER (~2 minutes)")
+        print()
+        print("  Pick up the camera box and rotate it slowly through a")
+        print("  figure-eight pattern -- as if drawing a large '8' in the air.")
+        print()
+        print("  Rules:")
+        print("    - Move SLOWLY and SMOOTHLY -- fast motion does not help")
+        print("    - Stay at least 30 cm away from metal objects and cables")
+        print("    - Do this at the deployment site, not at a workbench")
+        print("    - Keep rotating until status reaches 3")
+        print()
+        input("  Press Enter when you are ready to begin rotating > ")
+        print()
+        print("  Rotating -- keep moving in a figure-eight...")
+
+        while True:
+            s = imu.calibration_status()
+            print(f"\r  mag = {s['mag']}/3  sys = {s['system']}/3  ",
+                  end="", flush=True)
+            if s["mag"] == 3:
+                break
+            time.sleep(0.2)
+        print("\n  Magnetometer calibrated.\n")
+
+        # ── COMPLETE ──────────────────────────────────────────────────────────
+        print("─"*60)
+        s = imu.calibration_status()
+        print(f"All sub-systems fully calibrated.")
+        print(f"  sys={s['system']}  gyro={s['gyro']}  "
+              f"accel={s['accel']}  mag={s['mag']}")
 
     except KeyboardInterrupt:
         s = imu.calibration_status()
-        print(f"\n\nCalibration interrupted. "
-              f"Current status: sys={s['system']} gyro={s['gyro']} "
+        print(f"\n\nCalibration interrupted.")
+        print(f"  Current status: sys={s['system']} gyro={s['gyro']} "
               f"accel={s['accel']} mag={s['mag']}")
         if s["gyro"] < 3 or s["accel"] < 3 or s["mag"] < 3:
-            print("WARNING: Saving partial calibration. "
+            print("  WARNING: Saving partial calibration. "
                   "Heading accuracy may be reduced.")
 
     save_calibration(imu, save_path, node_id, magnetic_declination_deg)
@@ -611,8 +639,8 @@ def run_logger(imu: BNO055,
 if __name__ == "__main__":
 
     # ── CONFIGURATION ─────────────────────────────────────────────────────────
-    NODE_ID    = "node_1"
-    CALIB_PATH = f"./{NODE_ID}_bno055_calibration.json"
+    NODE_ID    = "007"
+    CALIB_PATH = CALIB_FILE   # ./bno055_calibration.json — matches path in SU-WaterCam/tools/bno055_imu.py
     LOG_PATH   = f"./{NODE_ID}_imu_log.csv"
 
     # Magnetic declination for your site (degrees).
@@ -625,7 +653,7 @@ if __name__ == "__main__":
     HEADING_CORRECTION = 0.0
 
     # ── CHOOSE MODE ───────────────────────────────────────────────────────────
-    MODE = "log"
+    MODE = "calibrate"
     # Options:
     #   "calibrate" — run full calibration procedure and save offsets
     #   "validate"  — check heading accuracy against a known bearing
