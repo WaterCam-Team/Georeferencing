@@ -175,3 +175,35 @@ def test_score_sort_missing_cloud_cover_ranked_last():
     s_good = _scene("2024-06-02T12:00:00Z", cloud_cover=0.15)
     result = score_and_sort_scenes([s_no_cloud, s_good])
     assert result[-1]["id"] == "2024-06-01T12:00:00Z"
+
+
+def test_score_sort_tz_naive_photo_dt_does_not_raise():
+    """Passing a tz-naive photo_dt must not raise TypeError on tz-aware acquired dates."""
+    naive_dt = datetime(2024, 6, 15, 12, 0, 0)  # no tzinfo
+    scenes = [
+        _scene("2024-06-15T12:00:00Z", cloud_cover=0.05),  # tz-aware acquired
+        _scene("2024-06-20T12:00:00Z", cloud_cover=0.10),
+    ]
+    # Must not raise; closer date should rank first
+    result = score_and_sort_scenes(scenes, photo_dt=naive_dt)
+    assert result[0]["id"] == "2024-06-15T12:00:00Z"
+
+
+def test_filter_scenes_sun_only_no_month_range():
+    """sun_elevation_min filter works correctly when month_range is None."""
+    scenes = [
+        _scene("2024-06-01T06:00:00Z", sun_elevation=10.0),
+        _scene("2024-06-01T12:00:00Z", sun_elevation=55.0),
+    ]
+    result = filter_scenes(scenes, month_range=None, sun_elevation_min=30.0)
+    assert len(result) == 1
+    assert result[0]["properties"]["sun_elevation"] == 55.0
+
+
+def test_filter_scenes_unparseable_acquired_dropped_with_month_range():
+    """Scenes with malformed 'acquired' are silently dropped when month filter is active."""
+    bad = _scene("not-a-date", cloud_cover=0.01, sun_elevation=60.0)
+    good = _scene("2024-06-15T12:00:00Z", cloud_cover=0.10)
+    result = filter_scenes([bad, good], month_range={6}, sun_elevation_min=None)
+    assert len(result) == 1
+    assert result[0] is good
