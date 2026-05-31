@@ -25,6 +25,7 @@ No additional dependencies beyond what planet_scene_pull.py already needs.
 from __future__ import annotations
 
 import argparse
+import mimetypes
 import sys
 import time
 import zipfile
@@ -81,10 +82,13 @@ def upload_images(base_url: str, task_id: str, image_paths: list[Path]) -> None:
     url = _api(base_url, f"/task/new/upload/{task_id}")
     for i, img in enumerate(image_paths, 1):
         print(f"  Uploading [{i}/{total}] {img.name} ...", end="\r", flush=True)
+        content_type, _ = mimetypes.guess_type(img.name)
+        if not content_type:
+            content_type = "application/octet-stream"
         with open(img, "rb") as f:
             resp = requests.post(
                 url,
-                files={"images": (img.name, f, "image/jpeg")},
+                files={"images": (img.name, f, content_type)},
                 timeout=120,
             )
             resp.raise_for_status()

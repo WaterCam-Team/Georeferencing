@@ -117,15 +117,28 @@ def ingest_dsm(
         nd = src.nodata
         bounds = src.bounds
         src_epsg = src_crs.to_epsg() if src_crs else None
+        total_count = src.width * src.height
 
-        raw = src.read(1).astype(np.float64)
-        if nd is not None and np.isnan(nd):
-            valid_mask = ~np.isnan(raw)
-        elif nd is not None:
-            valid_mask = raw != nd
-        else:
-            valid_mask = ~np.isnan(raw)  # still exclude NaN even with no declared nodata
-        valid = raw[valid_mask]
+        # Compute stats block-wise to avoid loading the full band into memory.
+        # Drone DSMs at 3–5 cm resolution can be multi-GB.
+        _nd_is_nan = nd is not None and np.isnan(nd)
+        valid_count = 0
+        z_min_acc = float("inf")
+        z_max_acc = float("-inf")
+
+        for _, window in src.block_windows(1):
+            block = src.read(1, window=window).astype(np.float64)
+            if _nd_is_nan:
+                bmask = ~np.isnan(block)
+            elif nd is not None:
+                bmask = (block != nd) & ~np.isnan(block)
+            else:
+                bmask = ~np.isnan(block)
+            vb = block[bmask]
+            valid_count += vb.size
+            if vb.size > 0:
+                z_min_acc = min(z_min_acc, float(vb.min()))
+                z_max_acc = max(z_max_acc, float(vb.max()))
 
         vertical_hint = (
             infer_vertical_datum_from_rasterio(src)
@@ -145,12 +158,12 @@ def ingest_dsm(
           f"E={bounds.right:.2f} N={bounds.top:.2f}")
 
     z_min = z_max = coverage_frac = None
-    if valid.size > 0:
-        z_min, z_max = float(valid.min()), float(valid.max())
-        coverage_frac = float(valid.size) / float(raw.size)
+    if valid_count > 0:
+        z_min, z_max = z_min_acc, z_max_acc
+        coverage_frac = float(valid_count) / float(total_count)
         print(f"  {INFO}  Elevation range: {z_min:.2f}–{z_max:.2f} m")
         print(f"  {INFO}  Coverage: {coverage_frac:.1%} of bounding box "
-              f"({valid.size:,} / {raw.size:,} cells)")
+              f"({valid_count:,} / {total_count:,} cells)")
         _check("Has valid elevation cells", True)
     else:
         _check("Has valid elevation cells", False, "all cells are nodata")
@@ -165,7 +178,15 @@ def ingest_dsm(
         vertical_hint = VERTICAL_ELLIPSOID
 
     # --- Reprojection decision ---
-    needs_reproject = (src_epsg != target_epsg) if src_epsg is not None else False
+    if src_epsg is not None:
+        needs_reproject = (src_epsg != target_epsg)
+    elif src_crs is not None:
+        # Valid CRS with no EPSG code (custom WKT, ESRI definition, etc.)
+        # — compare objects directly so we don't silently skip reprojection.
+        needs_reproject = not src_crs.equals(RasterioCRS.from_epsg(target_epsg))
+    else:
+        # No CRS at all — handled cleanly in the block below.
+        needs_reproject = False
     reprojected = False
     out_path: Optional[Path] = None
     out_res: Optional[float] = None
@@ -215,6 +236,8 @@ def ingest_dsm(
                         dst_transform=transform,
                         dst_crs=dst_crs,
                         resampling=Resampling.bilinear,
+                        src_nodata=nd,
+                        dst_nodata=nd,
                     )
 
         reprojected = True

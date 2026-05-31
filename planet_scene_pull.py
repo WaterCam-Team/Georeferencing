@@ -11,6 +11,7 @@ import os
 import sys
 import json
 import argparse
+import math
 import requests
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -342,7 +343,7 @@ def download_scene(api_key, scene_id, out_dir, asset_type="ortho_analytic_4b",
 
     if poll_interval <= 0:
         raise ValueError(f"poll_interval must be > 0, got {poll_interval}")
-    max_attempts = max(1, int(poll_timeout / poll_interval))
+    max_attempts = max(1, math.ceil(poll_timeout / poll_interval))
     print(f"Polling activation for {scene_id} (timeout {poll_timeout}s)...")
     for attempt in range(max_attempts):
         assets = requests.get(url, auth=(api_key, ""), timeout=30).json()
