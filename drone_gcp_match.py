@@ -148,89 +148,87 @@ def main() -> int:
         ortho_path, args.ortho_max_width
     )
 
-    if src.crs is None:
-        print("[ERR] Ortho GeoTIFF has no CRS; cannot convert pixels to lat/lon.")
-        src.close()
-        return 2
-    transformer_to_wgs84 = Transformer.from_crs(src.crs, CRS.from_epsg(4326), always_xy=True)
+    try:
+        if src.crs is None:
+            print("[ERR] Ortho GeoTIFF has no CRS; cannot convert pixels to lat/lon.")
+            return 2
+        # Transformer.from_crs() can raise; src must be closed via finally regardless.
+        transformer_to_wgs84 = Transformer.from_crs(src.crs, CRS.from_epsg(4326), always_xy=True)
 
-    # --- Feature detection and matching ---
-    det = build_detector(args.detector, args.nfeatures)
-    norm = _norm_type(args.detector)
+        # --- Feature detection and matching ---
+        det = build_detector(args.detector, args.nfeatures)
+        norm = _norm_type(args.detector)
 
-    kp1, des1 = det.detectAndCompute(field_gray, None)
-    kp2, des2 = det.detectAndCompute(ortho_gray, None)
+        kp1, des1 = det.detectAndCompute(field_gray, None)
+        kp2, des2 = det.detectAndCompute(ortho_gray, None)
 
-    if des1 is None or des2 is None or len(kp1) < 10 or len(kp2) < 10:
-        print(f"[ERR] Not enough keypoints: field={len(kp1) if kp1 else 0}, "
-              f"ortho={len(kp2) if kp2 else 0}")
-        src.close()
-        return 3
+        if des1 is None or des2 is None or len(kp1) < 10 or len(kp2) < 10:
+            print(f"[ERR] Not enough keypoints: field={len(kp1) if kp1 else 0}, "
+                  f"ortho={len(kp2) if kp2 else 0}")
+            return 3
 
-    print(f"[INFO] Detected keypoints: field={len(kp1)}, ortho={len(kp2)}  "
-          f"(detector={args.detector})")
+        print(f"[INFO] Detected keypoints: field={len(kp1)}, ortho={len(kp2)}  "
+              f"(detector={args.detector})")
 
-    bf = cv2.BFMatcher(norm)
-    knn = bf.knnMatch(des1, des2, k=2)
+        bf = cv2.BFMatcher(norm)
+        knn = bf.knnMatch(des1, des2, k=2)
 
-    good: List[Tuple[np.ndarray, np.ndarray]] = []
-    for m_n in knn:
-        if len(m_n) != 2:
-            continue
-        m, n = m_n
-        if m.distance < args.ratio * n.distance:
-            u1, v1 = kp1[m.queryIdx].pt
-            u2, v2 = kp2[m.trainIdx].pt
-            good.append((
-                np.array([u1, v1], dtype=np.float32),
-                np.array([u2, v2], dtype=np.float32),
+        good: List[Tuple[np.ndarray, np.ndarray]] = []
+        for m_n in knn:
+            if len(m_n) != 2:
+                continue
+            m, n = m_n
+            if m.distance < args.ratio * n.distance:
+                u1, v1 = kp1[m.queryIdx].pt
+                u2, v2 = kp2[m.trainIdx].pt
+                good.append((
+                    np.array([u1, v1], dtype=np.float32),
+                    np.array([u2, v2], dtype=np.float32),
+                ))
+
+        print(f"[INFO] Matches after ratio test ({args.ratio}): {len(good)}")
+
+        if len(good) < 4:
+            print(f"[ERR] Too few matches after ratio test: {len(good)}")
+            return 3
+
+        src_pts = np.array([g[0] for g in good], dtype=np.float32)
+        dst_pts = np.array([g[1] for g in good], dtype=np.float32)
+
+        H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,
+                                     ransacReprojThreshold=args.ransac_threshold)
+        if H is None or mask is None:
+            print("[ERR] Homography estimation failed.")
+            return 3
+
+        inliers_mask = mask.ravel().astype(bool)
+        inlier_pairs = [good[i] for i in range(len(good)) if inliers_mask[i]]
+        print(f"[INFO] RANSAC inliers: {len(inlier_pairs)} / {len(good)}")
+
+        if len(inlier_pairs) < args.min_inlier_matches:
+            print(f"[ERR] Too few RANSAC inliers: {len(inlier_pairs)} "
+                  f"(need >= {args.min_inlier_matches})")
+            return 3
+
+        match_pairs: List[MatchPair] = []
+        for src_xy, dst_xy in inlier_pairs:
+            match_pairs.append(MatchPair(
+                field_u=float(src_xy[0]), field_v=float(src_xy[1]),
+                planet_u=float(dst_xy[0]), planet_v=float(dst_xy[1]),
             ))
 
-    print(f"[INFO] Matches after ratio test ({args.ratio}): {len(good)}")
+        selected = _select_by_grid(match_pairs, field_w=field_w, field_h=field_h,
+                                    max_points=args.max_gcps)
 
-    if len(good) < 4:
-        print(f"[ERR] Too few matches after ratio test: {len(good)}")
+        gcps_out: List[Tuple[str, float, float, float, float]] = []
+        for i, s in enumerate(selected):
+            ortho_col = s.planet_u / scale_x
+            ortho_row = s.planet_v / scale_y
+            lat, lon = _ortho_pixel_to_latlon(src, ortho_col, ortho_row, transformer_to_wgs84)
+            gcps_out.append((f"drone_{i+1}", s.field_u, s.field_v, lat, lon))
+
+    finally:
         src.close()
-        return 3
-
-    src_pts = np.array([g[0] for g in good], dtype=np.float32)
-    dst_pts = np.array([g[1] for g in good], dtype=np.float32)
-
-    H, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC,
-                                 ransacReprojThreshold=args.ransac_threshold)
-    if H is None or mask is None:
-        print("[ERR] Homography estimation failed.")
-        src.close()
-        return 3
-
-    inliers_mask = mask.ravel().astype(bool)
-    inlier_pairs = [good[i] for i in range(len(good)) if inliers_mask[i]]
-    print(f"[INFO] RANSAC inliers: {len(inlier_pairs)} / {len(good)}")
-
-    if len(inlier_pairs) < args.min_inlier_matches:
-        print(f"[ERR] Too few RANSAC inliers: {len(inlier_pairs)} "
-              f"(need >= {args.min_inlier_matches})")
-        src.close()
-        return 3
-
-    match_pairs: List[MatchPair] = []
-    for src_xy, dst_xy in inlier_pairs:
-        match_pairs.append(MatchPair(
-            field_u=float(src_xy[0]), field_v=float(src_xy[1]),
-            planet_u=float(dst_xy[0]), planet_v=float(dst_xy[1]),
-        ))
-
-    selected = _select_by_grid(match_pairs, field_w=field_w, field_h=field_h,
-                                max_points=args.max_gcps)
-
-    gcps_out: List[Tuple[str, float, float, float, float]] = []
-    for i, s in enumerate(selected):
-        ortho_col = s.planet_u / scale_x
-        ortho_row = s.planet_v / scale_y
-        lat, lon = _ortho_pixel_to_latlon(src, ortho_col, ortho_row, transformer_to_wgs84)
-        gcps_out.append((f"drone_{i+1}", s.field_u, s.field_v, lat, lon))
-
-    src.close()
 
     _write_gcp_csv(out_path, gcps_out)
     print(f"[OK] Wrote {len(gcps_out)} GCPs to {out_path}")
