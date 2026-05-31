@@ -174,8 +174,10 @@ class BNO055:
         }
 
     def is_fully_calibrated(self) -> bool:
+        # accel=2 is the realistic ceiling on hardware with side-blocked antennas
+        # (only ±Z covered); gyro and mag must still reach 3.
         s = self.calibration_status()
-        return s["gyro"] == 3 and s["accel"] == 3 and s["mag"] == 3
+        return s["gyro"] == 3 and s["accel"] >= 2 and s["mag"] == 3
 
     # ── Euler angles ──────────────────────────────────────────────────────────
 
@@ -420,17 +422,18 @@ def run_calibration_procedure(imu: BNO055,
             print(f"\r  Done.       accel = {s['accel']}/3               ")
 
         s = imu.calibration_status()
-        if s["accel"] < 3:
+        if s["accel"] >= 2:
+            print(f"\n  Accelerometer at {s['accel']}/3 -- acceptable for this hardware.")
+        elif s["accel"] == 1:
             print()
-            print("  Accelerometer not yet at 3. Place the box in additional")
-            print("  orientations (any stable position not already used).")
-            while True:
-                s = imu.calibration_status()
-                print(f"\r  accel = {s['accel']}/3  ", end="", flush=True)
-                if s["accel"] == 3:
-                    break
-                time.sleep(0.2)
-        print("\n  Accelerometer calibrated.\n")
+            print("  WARNING: accel = 1/3. Pitch/roll readings will have larger offsets.")
+            print("  Proceeding -- heading (mag) accuracy is unaffected.")
+        else:
+            print()
+            print("  WARNING: accel = 0/3. Verify the box was held completely still")
+            print("  in each position. Proceeding anyway.")
+        print("  NOTE: accel=3 requires side-face positions blocked by the antennas.")
+        print("        2/3 is the expected ceiling on this hardware.\n")
 
         # ── STAGE 3: MAGNETOMETER ─────────────────────────────────────────────
         print("─"*60)
