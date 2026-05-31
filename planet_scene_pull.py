@@ -340,6 +340,8 @@ def download_scene(api_key, scene_id, out_dir, asset_type="ortho_analytic_4b",
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    if poll_interval <= 0:
+        raise ValueError(f"poll_interval must be > 0, got {poll_interval}")
     max_attempts = max(1, int(poll_timeout / poll_interval))
     print(f"Polling activation for {scene_id} (timeout {poll_timeout}s)...")
     for attempt in range(max_attempts):
@@ -468,12 +470,13 @@ def parse_args():
         "--download", metavar="SCENE_ID",
         help="Activate and download a specific scene ID without prompting"
     )
-    p.add_argument(
+    _download_mode = p.add_mutually_exclusive_group()
+    _download_mode.add_argument(
         "--auto-best", action="store_true",
         help="After filtering and ranking, automatically download the best scene "
-             "(lowest cloud cover, closest date). Mutually exclusive with --interactive."
+             "(lowest cloud cover, closest date)"
     )
-    p.add_argument(
+    _download_mode.add_argument(
         "--interactive", action="store_true",
         help="After searching, prompt to select a scene for download"
     )

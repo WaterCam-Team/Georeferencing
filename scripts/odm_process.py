@@ -184,8 +184,8 @@ def download_asset(base_url: str, task_id: str,
             tmp_path.unlink(missing_ok=True)
             return False
     else:
-        # Direct file response — rename temp to final path
-        tmp_path.rename(out_path)
+        # Direct file response — replace final path atomically (works on Windows too)
+        tmp_path.replace(out_path)
 
     print(f"→ {out_path}")
     return True
@@ -200,7 +200,7 @@ def parse_options(raw: list[str]) -> dict:
     opts = dict(_DEFAULT_OPTIONS)
     for item in raw:
         if "=" not in item:
-            raise argparse.ArgumentTypeError(
+            raise ValueError(
                 f"--options items must be key=value, got: {item!r}"
             )
         k, _, v = item.partition("=")
@@ -260,7 +260,11 @@ def main() -> int:
 
     print(f"{INFO}  Found {len(image_paths)} image(s) in {images_dir}")
 
-    options = parse_options(args.options)
+    try:
+        options = parse_options(args.options)
+    except ValueError as exc:
+        print(f"[ERR] {exc}", file=sys.stderr)
+        return 2
     print(f"{INFO}  ODM options: {options}")
 
     out_dir = Path(args.out_dir)
