@@ -19,37 +19,39 @@ from drone_dsm_ingest import ingest_dsm, IngestResult
 
 def _write_synthetic_raster(
     path: Path,
-    epsg: int,
+    epsg: int | None,
     width: int = 20,
     height: int = 20,
     z_base: float = 110.0,
     nodata: float = -9999.0,
     nodata_frac: float = 0.0,
+    use_nan_nodata: bool = False,
 ) -> Path:
     """Write a tiny synthetic single-band GeoTIFF."""
-    crs = CRS.from_epsg(epsg)
+    crs = CRS.from_epsg(epsg) if epsg is not None else None
 
     if epsg == 6347:
-        # UTM coordinates in metres (near Syracuse NY)
         left, bottom, right, top = 380000.0, 4762000.0, 380020.0, 4762020.0
     else:
-        # Geographic coordinates (WGS84)
         left, bottom, right, top = -76.14, 43.04, -76.13, 43.05
 
     transform = from_bounds(left, bottom, right, top, width, height)
     data = np.full((height, width), z_base, dtype=np.float32)
 
+    actual_nodata = float("nan") if use_nan_nodata else nodata
     if nodata_frac > 0:
         n_nd = max(1, int(width * height * nodata_frac))
-        data.ravel()[:n_nd] = nodata
+        data.ravel()[:n_nd] = actual_nodata
 
-    with rasterio.open(
-        path, "w", driver="GTiff",
-        height=height, width=width,
-        count=1, dtype="float32",
-        crs=crs, transform=transform,
-        nodata=nodata,
-    ) as dst:
+    kwargs = dict(
+        driver="GTiff", height=height, width=width,
+        count=1, dtype="float32", transform=transform,
+        nodata=actual_nodata,
+    )
+    if crs is not None:
+        kwargs["crs"] = crs
+
+    with rasterio.open(path, "w", **kwargs) as dst:
         dst.write(data, 1)
 
     return path
@@ -147,3 +149,46 @@ def test_vertical_hint_unknown_returns_ellipsoid_default(tmp_path):
 
     # Should not be None; pipeline needs a datum hint
     assert result.vertical_hint is not None
+
+
+# ---------------------------------------------------------------------------
+# NaN nodata (Copilot bug fix regression tests)
+# ---------------------------------------------------------------------------
+
+def test_nan_nodata_cells_excluded_from_stats(tmp_path):
+    """Rasters with NaN as the nodata value must not count NaN cells as valid."""
+    src = _write_synthetic_raster(
+        tmp_path / "dem_nan.tif", epsg=6347,
+        z_base=110.0, nodata_frac=0.5, use_nan_nodata=True,
+    )
+    result = ingest_dsm(src, tmp_path / "out", skip_reproject=True)
+
+    assert result.coverage_frac is not None
+    # ~50% of cells are NaN nodata → coverage should be around 50%, not ~100%
+    assert 0.40 <= result.coverage_frac <= 0.60
+
+
+def test_nan_nodata_all_invalid_reports_failure(tmp_path):
+    """All-NaN raster should report failure even when nodata declared as NaN."""
+    src = _write_synthetic_raster(
+        tmp_path / "dem_all_nan.tif", epsg=6347,
+        nodata_frac=1.0, use_nan_nodata=True,
+    )
+    result = ingest_dsm(src, tmp_path / "out", skip_reproject=True)
+
+    assert "no valid cells" in result.failures
+    assert result.checks_passed is False
+
+
+# ---------------------------------------------------------------------------
+# Missing CRS (Copilot bug fix regression test)
+# ---------------------------------------------------------------------------
+
+def test_missing_crs_skips_reproject_and_fails(tmp_path):
+    """A raster with no CRS should not attempt reprojection (would crash) and should fail."""
+    src = _write_synthetic_raster(tmp_path / "dem_nocrs.tif", epsg=None)
+    result = ingest_dsm(src, tmp_path / "out", target_epsg=6347)
+
+    assert result.reprojected is False
+    assert result.checks_passed is False
+    assert any("CRS" in f or "crs" in f.lower() for f in result.failures)
