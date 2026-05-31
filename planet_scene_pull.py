@@ -362,7 +362,8 @@ def download_scene(api_key, scene_id, out_dir, asset_type="ortho_analytic_4b",
             print("Download complete.")
             return fname
 
-        time.sleep(poll_interval)
+        if attempt < max_attempts - 1:
+            time.sleep(poll_interval)
 
     print("Asset did not activate within the polling window. Try again later.")
     return None
