@@ -1,10 +1,13 @@
 {
   "unit_id": "UFO-006",
   "calibration": "./calibration.json",
-  "mount_height_m": 0.8382,
-  "heading_deg": 265.0,
-  "pitch_deg": null,
+  "camera_lat": 43.15813972,
+  "camera_lon": -76.13810221,
+  "camera_alt_ellipsoid_m": 87.0422,
+  "mount_height_m": 0.9652,
+  "heading_deg": 69.48,
+  "pitch_deg": 4.35,
   "roll_deg": null,
   "camera_elev_datum": "wgs84_ellipsoid",
-  "notes": "OV5647 camera, west-facing fixed mount, 33-inch pole"
+  "notes": "OV5647 camera, east-facing fixed mount, Meadowbrook site. Position surveyed 2026-06-01 with viDoc RTK (rtkFixed, 2 cm H accuracy, 14 cm start/end consistency over 1142 readings). Heading corrected from 265 deg (data-entry error, ~180 deg wrong) to 69.48 deg via ArUco GCP optimisation against 2026-06-01-16-46-35 Pix4DCatch scan. Pitch 4.35 deg (positive = looking slightly upward; consistent with terrain east of sensor sitting higher than camera mount position). ArUco RMSE 5.2 m with 2 GCPs; independent validation with 4+ GCPs pending."
 }

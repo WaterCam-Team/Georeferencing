@@ -39,6 +39,7 @@ _REQUIRED_FIELDS: list[str] = []          # none strictly required
 _KNOWN_FIELDS: set[str] = {
     "unit_id", "calibration", "mount_height_m",
     "heading_deg", "pitch_deg", "roll_deg",
+    "camera_lat", "camera_lon", "camera_alt_ellipsoid_m",
     "camera_elev_datum", "notes",
 }
 
@@ -66,6 +67,21 @@ class UnitConfig:
         return float(v) if v is not None else None
 
     @property
+    def camera_lat(self) -> Optional[float]:
+        v = self._d.get("camera_lat")
+        return float(v) if v is not None else None
+
+    @property
+    def camera_lon(self) -> Optional[float]:
+        v = self._d.get("camera_lon")
+        return float(v) if v is not None else None
+
+    @property
+    def camera_alt_ellipsoid_m(self) -> Optional[float]:
+        v = self._d.get("camera_alt_ellipsoid_m")
+        return float(v) if v is not None else None
+
+    @property
     def heading_deg(self) -> Optional[float]:
         v = self._d.get("heading_deg")
         return float(v) if v is not None else None
@@ -89,6 +105,25 @@ class UnitConfig:
         return self._d.get("notes", "")
 
     # ── Merge helpers ─────────────────────────────────────────────────────────
+
+    def resolve_position(
+        self,
+        cli_lat: Optional[float],
+        cli_lon: Optional[float],
+        exif_lat: Optional[float] = None,
+        exif_lon: Optional[float] = None,
+    ) -> tuple[Optional[float], Optional[float], str]:
+        """
+        Return (lat, lon, source_label).
+        Source: 'cli' > 'unit_config' > 'exif' > (None, None, 'none')
+        """
+        if cli_lat is not None and cli_lon is not None:
+            return float(cli_lat), float(cli_lon), "cli"
+        if self.camera_lat is not None and self.camera_lon is not None:
+            return self.camera_lat, self.camera_lon, "unit_config"
+        if exif_lat is not None and exif_lon is not None:
+            return float(exif_lat), float(exif_lon), "exif"
+        return None, None, "none"
 
     def resolve_calibration(self, cli_override: Optional[str] = None,
                             config_dir: str = ".") -> str:
@@ -153,6 +188,10 @@ class UnitConfig:
         parts = []
         if self.unit_id:
             parts.append(f"unit={self.unit_id}")
+        if self.camera_lat is not None:
+            parts.append(f"lat={self.camera_lat:.6f}")
+        if self.camera_lon is not None:
+            parts.append(f"lon={self.camera_lon:.6f}")
         if self.mount_height_m is not None:
             parts.append(f"mount={self.mount_height_m:.4f}m")
         if self.heading_deg is not None:
