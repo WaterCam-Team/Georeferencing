@@ -346,8 +346,11 @@ def main() -> int:
             las_path=args.las,
             las_crs_epsg=args.las_crs,
         )
-    except ValueError as exc:
-        print(f"[ERR] {exc}", file=sys.stderr)
+    except Exception as exc:
+        # make_terrain_provider raises ValueError for missing files, but
+        # rasterio raises RasterioIOError (not a ValueError subclass) for
+        # corrupt or unreadable GeoTIFFs.
+        print(f"[ERR] Could not load terrain: {exc}", file=sys.stderr)
         return 2
 
     # Resolve camera elevation in terrain datum
@@ -357,6 +360,21 @@ def main() -> int:
         cam_elev_m = ground_elev + height
         print(f"  Camera elevation: {ground_elev:.2f} (ground) + {height:.4f} (AGL) "
               f"= {cam_elev_m:.2f} m  [{terrain_datum}]")
+    elif height is None and ground_elev is not None:
+        # DEM covers the camera position but mount height is unknown — warn
+        # explicitly so the user knows the DEM is not being used for elevation.
+        print(f"  [WARN] DEM ground elevation at camera = {ground_elev:.2f} m, "
+              f"but --height-above-ground not provided.", file=sys.stderr)
+        print(f"         Pass --height-above-ground <m> (e.g. {ground_elev:.2f} + mount_m) "
+              f"for terrain-accurate camera elevation.", file=sys.stderr)
+        if exif["alt"] is not None:
+            cam_elev_m = float(exif["alt"])
+            print(f"  Camera elevation from EXIF: {cam_elev_m:.2f} m  "
+                  f"(datum may differ from terrain)", file=sys.stderr)
+        else:
+            print("[ERR] Cannot determine camera elevation — no EXIF altitude either. "
+                  "Provide --height-above-ground.", file=sys.stderr)
+            return 2
     elif exif["alt"] is not None:
         cam_elev_m = float(exif["alt"])
         print(f"  Camera elevation from EXIF: {cam_elev_m:.2f} m  "
