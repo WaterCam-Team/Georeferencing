@@ -59,16 +59,60 @@ def _load_scene_reference_frame(scan_dir: Path):
 
 def _read_gltf_pointcloud(scan_dir: Path):
     """
-    Parse pointcloud.gltf + pointcloud.bin.
+    Parse the OPF point cloud. Supports two formats emitted by Pix4DCatch:
+
+    New (2025+): opf_format/pcl.gltf + separate positions.glbin / colors.glbin
+        POSITION accessor → VEC3 float32, COLOR_0 accessor → VEC4 uint8
+    Legacy:      legacy/pointcloud.gltf + pointcloud.bin
+        Single interleaved buffer: XYZRGB as 6 × float32 per point (stride 24)
 
     Returns:
         xyz_local : (N, 3) float64 -- local scene coordinates
         rgb_uint8 : (N, 3) uint8   -- colours 0-255
     """
-    legacy = scan_dir / "point_clouds" / "legacy"
-    gltf_path = legacy / "pointcloud.gltf"
-    bin_path = legacy / "pointcloud.bin"
+    opf_gltf = scan_dir / "point_clouds" / "opf_format" / "pcl.gltf"
+    leg_gltf  = scan_dir / "point_clouds" / "legacy" / "pointcloud.gltf"
 
+    if opf_gltf.exists():
+        return _read_opf_pointcloud(opf_gltf)
+    if leg_gltf.exists():
+        return _read_legacy_pointcloud(leg_gltf)
+    raise FileNotFoundError(
+        f"No point cloud found under {scan_dir / 'point_clouds'}. "
+        "Expected opf_format/pcl.gltf or legacy/pointcloud.gltf."
+    )
+
+
+def _read_opf_pointcloud(gltf_path: Path):
+    """New OPF format: positions.glbin (VEC3 float32) + colors.glbin (VEC4 uint8)."""
+    with open(gltf_path) as f:
+        gltf = json.load(f)
+
+    pc_dir = gltf_path.parent
+    attrs = gltf["meshes"][0]["primitives"][0]["attributes"]
+
+    def _read_accessor(acc_idx: int, dtype) -> np.ndarray:
+        acc = gltf["accessors"][acc_idx]
+        n = acc["count"]
+        bv = gltf["bufferViews"][acc["bufferView"]]
+        uri = gltf["buffers"][bv["buffer"]]["uri"]
+        offset = bv.get("byteOffset", 0)
+        length = bv["byteLength"]
+        with open(pc_dir / uri, "rb") as f:
+            f.seek(offset)
+            raw = f.read(length)
+        components = {"VEC2": 2, "VEC3": 3, "VEC4": 4}.get(acc["type"], 1)
+        return np.frombuffer(raw, dtype=dtype).reshape(n, components)
+
+    xyz_local = _read_accessor(attrs["POSITION"], np.float32).astype(np.float64)
+    rgba      = _read_accessor(attrs["COLOR_0"],  np.uint8)
+    rgb_uint8 = rgba[:, :3]
+    return xyz_local, rgb_uint8
+
+
+def _read_legacy_pointcloud(gltf_path: Path):
+    """Legacy format: single interleaved XYZRGB buffer (6 × float32, stride 24)."""
+    bin_path = gltf_path.parent / "pointcloud.bin"
     with open(gltf_path) as f:
         gltf = json.load(f)
 
@@ -86,9 +130,8 @@ def _read_gltf_pointcloud(scan_dir: Path):
 
     arr = np.frombuffer(raw, dtype=np.float32).reshape(n_points, stride // 4)
     xyz_local = arr[:, :3].astype(np.float64)
-    rgb_norm = arr[:, 3:6]
+    rgb_norm  = arr[:, 3:6]
     rgb_uint8 = (rgb_norm * 255).clip(0, 255).astype(np.uint8)
-
     return xyz_local, rgb_uint8
 
 
