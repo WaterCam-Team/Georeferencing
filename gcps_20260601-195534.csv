@@ -1,0 +1,2 @@
+label,pixel_u,pixel_v,lat,lon,elev_m,n_views,std_m,image
+aruco_3,2065.25,1482.25,43.15814688,-76.13793242,86.197,6,0.7176,20260601-195534-NIR-OFF.jpg
