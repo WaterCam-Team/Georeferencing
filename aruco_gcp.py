@@ -210,6 +210,28 @@ def locate_in_pix4d(
     to_utm = Transformer.from_crs("EPSG:6318", "EPSG:6347", always_xy=True)
     to_wgs84 = Transformer.from_crs("EPSG:6347", "EPSG:4326", always_xy=True)
 
+    # ── Geoid separation for ellipsoidal → orthometric conversion ────────────
+    # OPF geolocation altitudes are WGS84 ellipsoidal; elev_m output should be
+    # NAVD88/EGM96 orthometric so it matches DEM-derived elevations in the rest
+    # of the pipeline.  At Syracuse NY, N ≈ −34.5 m, so omitting this causes a
+    # ~35 m error in all reported marker elevations.
+    geoid_sep: Optional[float] = None
+    rtk_path = session_dir / "geolocations" / "rtkGPS.csv"
+    if rtk_path.exists():
+        seps: list[float] = []
+        with open(rtk_path) as _f:
+            for _row in csv.DictReader(_f):
+                try:
+                    seps.append(float(_row["GeoidSeparation"]))
+                except (KeyError, ValueError):
+                    pass
+        if seps:
+            geoid_sep = sum(seps) / len(seps)
+    if geoid_sep is not None:
+        print(f"[aruco_gcp] Geoid separation N={geoid_sep:.3f} m → elev_m will be orthometric")
+    else:
+        print("[aruco_gcp] WARNING: rtkGPS.csv missing or no GeoidSeparation; elev_m will be ellipsoidal")
+
     detector = _make_detector(dict_name)
     observations: dict[int, list[np.ndarray]] = {}  # id → list of ENU world points
 
@@ -288,15 +310,18 @@ def locate_in_pix4d(
         mean_enu = arr.mean(axis=0)
         std_m    = float(np.std(np.linalg.norm(arr - mean_enu, axis=1)))
         lon_out, lat_out = to_wgs84.transform(mean_enu[0], mean_enu[1])
+        elev_ellip = float(mean_enu[2])
+        elev_out = (elev_ellip - geoid_sep) if geoid_sep is not None else elev_ellip
         result[mid] = {
             "lat": float(lat_out),
             "lon": float(lon_out),
-            "elev_m": float(mean_enu[2]),
+            "elev_m": elev_out,
             "n_views": len(pts),
             "std_m": std_m,
         }
+        datum_tag = "ortho" if geoid_sep is not None else "ellip"
         print(f"  marker {mid:3d}: lat={lat_out:.7f}  lon={lon_out:.7f}  "
-              f"elev={mean_enu[2]:.2f} m  n={len(pts)}  std={std_m:.3f} m")
+              f"elev={elev_out:.2f} m ({datum_tag})  n={len(pts)}  std={std_m:.3f} m")
 
     return result
 
