@@ -1,4 +1,4 @@
-"""Tests for UnitConfig.resolve_heading IMU correction logic."""
+"""Tests for UnitConfig.resolve_heading and resolve_pitch_roll IMU correction logic."""
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -76,3 +76,72 @@ class TestResolveHeading:
         heading, src = cfg.resolve_heading(cli_override=None, exif_yaw=72.3)
         assert abs(heading - 72.3) < 0.001
         assert src == "exif_yaw_corrected"
+
+
+class TestResolvePitchRoll:
+    def test_zero_offset_passthrough(self):
+        cfg = _cfg({})
+        pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, 3.0)
+        assert abs(pitch - 5.0) < 0.001
+        assert abs(roll  - 3.0) < 0.001
+        assert src == "exif_corrected"
+
+    def test_180_degree_negates_both(self):
+        cfg = _cfg({"imu_mount_offset_deg": 180.0})
+        pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, 3.0)
+        assert abs(pitch - (-5.0)) < 0.001
+        assert abs(roll  - (-3.0)) < 0.001
+        assert src == "exif_corrected"
+
+    def test_90_degree_swaps_with_sign(self):
+        # θ=90°: pitch_out = -roll_in, roll_out = pitch_in
+        cfg = _cfg({"imu_mount_offset_deg": 90.0})
+        pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, 3.0)
+        assert abs(pitch - (-3.0)) < 0.001
+        assert abs(roll  -   5.0)  < 0.001
+        assert src == "exif_corrected"
+
+    def test_270_degree_swaps_with_opposite_sign(self):
+        # θ=270°: pitch_out = roll_in, roll_out = -pitch_in
+        cfg = _cfg({"imu_mount_offset_deg": 270.0})
+        pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, 3.0)
+        assert abs(pitch -   3.0)  < 0.001
+        assert abs(roll  - (-5.0)) < 0.001
+        assert src == "exif_corrected"
+
+    def test_cli_wins_no_rotation_applied(self):
+        cfg = _cfg({"imu_mount_offset_deg": 180.0})
+        pitch, roll, src = cfg.resolve_pitch_roll(10.0, 2.0, 5.0, 3.0)
+        assert pitch == 10.0
+        assert roll  ==  2.0
+        assert src == "cli"
+
+    def test_partial_cli_override(self):
+        # Only pitch CLI set — roll defaults to 0, no rotation
+        cfg = _cfg({"imu_mount_offset_deg": 180.0})
+        pitch, roll, src = cfg.resolve_pitch_roll(10.0, None, 5.0, 3.0)
+        assert pitch == 10.0
+        assert roll  ==  0.0
+        assert src == "cli"
+
+    def test_unit_config_wins_no_rotation_applied(self):
+        cfg = _cfg({"pitch_deg": 7.0, "roll_deg": 1.0, "imu_mount_offset_deg": 180.0})
+        pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, 3.0)
+        assert pitch == 7.0
+        assert roll  == 1.0
+        assert src == "unit_config"
+
+    def test_partial_exif_no_rotation(self):
+        # Only pitch in EXIF — cannot apply rotation, passes through
+        cfg = _cfg({"imu_mount_offset_deg": 180.0})
+        pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, None)
+        assert abs(pitch - 5.0) < 0.001
+        assert roll == 0.0
+        assert src == "exif"
+
+    def test_default_when_nothing_available(self):
+        cfg = _cfg({})
+        pitch, roll, src = cfg.resolve_pitch_roll(None, None, None, None)
+        assert pitch == 0.0
+        assert roll  == 0.0
+        assert src == "default"

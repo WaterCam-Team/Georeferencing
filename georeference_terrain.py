@@ -908,10 +908,9 @@ def main() -> int:
         pass
 
     # Resolve orientation: CLI > unit config > EXIF > 0
-    heading, h_src = ucfg.resolve_heading(args.heading, exif_yaw)
-    pitch,   p_src = ucfg.resolve_pitch(args.pitch, exif_pitch)
-    roll,    r_src = ucfg.resolve_roll(args.roll, exif_roll)
-    print(f"[POSE] heading={heading:.2f}° ({h_src})  pitch={pitch:.2f}° ({p_src})  roll={roll:.2f}° ({r_src})")
+    heading, h_src          = ucfg.resolve_heading(args.heading, exif_yaw)
+    pitch, roll, pr_src     = ucfg.resolve_pitch_roll(args.pitch, args.roll, exif_pitch, exif_roll)
+    print(f"[POSE] heading={heading:.2f}° ({h_src})  pitch={pitch:.2f}° ({pr_src})  roll={roll:.2f}° ({pr_src})")
 
     # Write back so downstream args.heading/pitch/roll references stay consistent
     args.heading, args.pitch, args.roll = heading, pitch, roll
