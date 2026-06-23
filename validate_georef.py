@@ -299,15 +299,14 @@ def validate(image_path, dem_path, ucfg, pix4d_dir=None, grid_n=7,
     cam_lat, cam_lon = pose["lat"], pose["lon"]
     exif_alt = pose["altitude_m"]
 
-    heading, h_src = ucfg.resolve_heading(cli_heading, pose.get("heading"), pose.get("heading"))
-    pitch,   p_src = ucfg.resolve_pitch(cli_pitch, pose.get("pitch"))
-    roll,    r_src = ucfg.resolve_roll(cli_roll, pose.get("roll"))
+    heading, h_src          = ucfg.resolve_heading(cli_heading, pose.get("heading"), pose.get("heading"))
+    pitch, roll, pr_src     = ucfg.resolve_pitch_roll(cli_pitch, cli_roll, pose.get("pitch"), pose.get("roll"))
 
     print(f"    GPS:      lat={cam_lat:.6f}  lon={cam_lon:.6f}")
     print(f"    Altitude: {exif_alt:.2f} m (EXIF GPS altitude)")
     print(f"    Heading:  {heading:.2f}°  [{h_src}]")
-    print(f"    Pitch:    {pitch:.2f}°   [{p_src}]")
-    print(f"    Roll:     {roll:.2f}°    [{r_src}]")
+    print(f"    Pitch:    {pitch:.2f}°   [{pr_src}]")
+    print(f"    Roll:     {roll:.2f}°    [{pr_src}]")
 
     img = cv2.imread(image_path)
     if img is None:
