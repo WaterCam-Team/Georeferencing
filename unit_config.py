@@ -31,6 +31,7 @@ Fields set to null (or omitted) are filled from EXIF or left at script defaults.
 from __future__ import annotations
 
 import json
+import math
 import os
 from typing import Any, Optional
 
@@ -150,25 +151,48 @@ class UnitConfig:
             return float(exif_gps_track), "exif_gps_track"
         return 0.0, "default"
 
-    def resolve_pitch(self, cli_override: Optional[float],
-                      exif_pitch: Optional[float]) -> tuple[float, str]:
-        if cli_override is not None:
-            return float(cli_override), "cli"
-        if self.pitch_deg is not None:
-            return self.pitch_deg, "unit_config"
-        if exif_pitch is not None:
-            return float(exif_pitch), "exif"
-        return 0.0, "default"
+    def resolve_pitch_roll(self,
+                           cli_pitch: Optional[float], cli_roll: Optional[float],
+                           exif_pitch: Optional[float], exif_roll: Optional[float],
+                           ) -> tuple[float, float, str]:
+        """
+        Return (pitch_deg, roll_deg, source_label).
+        Source: 'cli' > 'unit_config' > 'exif_corrected' > 'exif' > 0.0
 
-    def resolve_roll(self, cli_override: Optional[float],
-                     exif_roll: Optional[float]) -> tuple[float, str]:
-        if cli_override is not None:
-            return float(cli_override), "cli"
-        if self.roll_deg is not None:
-            return self.roll_deg, "unit_config"
+        When both values come from EXIF, the mount rotation is applied:
+            corrected_pitch = exif_pitch * cos(θ) − exif_roll * sin(θ)
+            corrected_roll  = exif_pitch * sin(θ) + exif_roll * cos(θ)
+        where θ = imu_mount_offset_deg. This un-does the apparent pitch/roll
+        swap and sign flip introduced by mounting the sensor at an arbitrary
+        yaw angle relative to the camera body.
+
+        CLI and unit_config values are assumed to already be in camera frame.
+        """
+        if cli_pitch is not None or cli_roll is not None:
+            p = float(cli_pitch) if cli_pitch is not None else 0.0
+            r = float(cli_roll)  if cli_roll  is not None else 0.0
+            return p, r, "cli"
+
+        if self.pitch_deg is not None or self.roll_deg is not None:
+            p = self.pitch_deg if self.pitch_deg is not None else 0.0
+            r = self.roll_deg  if self.roll_deg  is not None else 0.0
+            return p, r, "unit_config"
+
+        if exif_pitch is not None and exif_roll is not None:
+            theta = math.radians(self.imu_mount_offset_deg)
+            p = float(exif_pitch)
+            r = float(exif_roll)
+            corrected_pitch = p * math.cos(theta) - r * math.sin(theta)
+            corrected_roll  = p * math.sin(theta) + r * math.cos(theta)
+            return corrected_pitch, corrected_roll, "exif_corrected"
+
+        # Partial EXIF — only one axis available, pass through without rotation
+        if exif_pitch is not None:
+            return float(exif_pitch), 0.0, "exif"
         if exif_roll is not None:
-            return float(exif_roll), "exif"
-        return 0.0, "default"
+            return 0.0, float(exif_roll), "exif"
+
+        return 0.0, 0.0, "default"
 
     def resolve_mount_height(self, cli_override: Optional[float]) -> tuple[Optional[float], str]:
         if cli_override is not None:
