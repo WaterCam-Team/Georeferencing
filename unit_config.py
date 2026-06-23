@@ -40,6 +40,11 @@ _KNOWN_FIELDS: set[str] = {
     "unit_id", "calibration", "mount_height_m",
     "heading_deg", "pitch_deg", "roll_deg",
     "camera_elev_datum", "notes",
+    # IMU / BNO055 fields
+    "imu_mount_offset_deg",        # physical mount rotation to add to raw heading (e.g. 180.0 if rotated)
+    "imu_magnetic_declination_deg",# site magnetic declination (degrees, positive = East)
+    "imu_heading_correction_deg",  # residual correction from validate_heading(); update after calibration
+    "imu_calibration_file",        # path to BNO055 offset JSON saved by bno055_calibration.py
 }
 
 
@@ -85,6 +90,25 @@ class UnitConfig:
         return self._d.get("camera_elev_datum") or None
 
     @property
+    def imu_mount_offset_deg(self) -> float:
+        v = self._d.get("imu_mount_offset_deg")
+        return float(v) if v is not None else 0.0
+
+    @property
+    def imu_magnetic_declination_deg(self) -> float:
+        v = self._d.get("imu_magnetic_declination_deg")
+        return float(v) if v is not None else 0.0
+
+    @property
+    def imu_heading_correction_deg(self) -> float:
+        v = self._d.get("imu_heading_correction_deg")
+        return float(v) if v is not None else 0.0
+
+    @property
+    def imu_calibration_file(self) -> Optional[str]:
+        return self._d.get("imu_calibration_file") or None
+
+    @property
     def notes(self) -> str:
         return self._d.get("notes", "")
 
@@ -107,13 +131,21 @@ class UnitConfig:
         """
         Return (heading_deg, source_label).
         Source: 'cli' > 'unit_config' > 'exif_yaw' > 'exif_gps_track' > 0.0
+
+        When heading comes from EXIF, per-unit IMU corrections are applied:
+        mount offset, magnetic declination, and post-calibration residual.
+        unit_config and cli values are assumed to already be true headings.
         """
         if cli_override is not None:
             return float(cli_override), "cli"
         if self.heading_deg is not None:
             return self.heading_deg, "unit_config"
+        imu_offset = (self.imu_mount_offset_deg
+                      + self.imu_magnetic_declination_deg
+                      + self.imu_heading_correction_deg)
         if exif_yaw is not None:
-            return float(exif_yaw), "exif_yaw"
+            corrected = (float(exif_yaw) + imu_offset) % 360.0
+            return corrected, "exif_yaw_corrected"
         if exif_gps_track is not None:
             return float(exif_gps_track), "exif_gps_track"
         return 0.0, "default"
