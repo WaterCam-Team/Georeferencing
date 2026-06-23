@@ -2,9 +2,13 @@
   "unit_id": "UFO-006",
   "calibration": "./calibration.json",
   "mount_height_m": 0.8382,
-  "heading_deg": 265.0,
+  "heading_deg": null,
   "pitch_deg": null,
   "roll_deg": null,
   "camera_elev_datum": "wgs84_ellipsoid",
-  "notes": "OV5647 camera, west-facing fixed mount, 33-inch pole"
+  "imu_mount_offset_deg": 180.0,
+  "imu_magnetic_declination_deg": -12.5,
+  "imu_heading_correction_deg": 0.0,
+  "imu_calibration_file": "./bno055_calibration.json",
+  "notes": "OV5647 camera, ENE-facing fixed mount (~70°), 33-inch pole. BNO055 mounted 180° rotated from nominal orientation."
 }
