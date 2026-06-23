@@ -18,14 +18,21 @@ Unit config JSON schema
   "unit_id":            "UFO-006",        // human identifier
   "calibration":        "./calibration.json",
   "mount_height_m":     0.8382,           // camera height above ground (m); null = derive from EXIF altitude
-  "heading_deg":        265.0,            // fixed mount heading (deg, 0=N); null = use EXIF Yaw
+  "heading_deg":        null,             // fixed true heading (deg, 0=N); null = use EXIF Yaw + IMU corrections
   "pitch_deg":          null,             // fixed mount pitch; null = use EXIF Pitch
   "roll_deg":           null,             // fixed mount roll;  null = use EXIF Roll
   "camera_elev_datum":  "wgs84_ellipsoid",// datum of GPS altitude from this unit's GPS module
-  "notes":              ""               // free-text description
+  "notes":              "",              // free-text description
+
+  // IMU / BNO055 fields — applied to EXIF Yaw in resolve_heading() only
+  "imu_mount_offset_deg":         180.0,  // physical sensor rotation relative to camera body
+  "imu_magnetic_declination_deg": -12.5,  // site declination, positive = East (Syracuse NY ≈ -12.5)
+  "imu_heading_correction_deg":   0.0,    // residual error from post-mount validation; update after Stage 2
+  "imu_calibration_file":         "./bno055_calibration.json"  // offset file path (informational)
 }
 
 Fields set to null (or omitted) are filled from EXIF or left at script defaults.
+heading_deg takes precedence over EXIF — set to null to allow IMU corrections to flow through.
 """
 
 from __future__ import annotations
