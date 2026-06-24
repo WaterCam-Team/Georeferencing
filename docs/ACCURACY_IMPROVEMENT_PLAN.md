@@ -1,10 +1,17 @@
 # Accuracy Improvement Plan — UFO-Net Georeferencing Pipeline
 
-**Status as of 2026-06-12**  
+**Status as of 2026-06-24**  
 **Site:** Meadowbrook-006 (UFO-006), Syracuse, NY  
 **Current empirical residual:** 0.86 m (2-point sample, ArUco session 2026-06-01, 13.4 m slant range, pose-refined heading 69.48°)  
 **Design target:** 5 cm at ground level  
 **Immediate binding constraint:** Ground-truth floor — Pix4DCatch marker localization std ≈ 0.7–0.8 m
+
+**Pipeline work completed since 2026-06-12 (no new field data yet):**
+- §2.1 BNO055 180° offset — corrected in pipeline via `imu_mount_offset_deg: 180.0` in `unit_config_UFO006.json`; `resolve_heading()` applies mount offset + magnetic declination (−12.5°) + residual correction whenever EXIF IMU yaw is the source. Raw sensor-frame heading preserved in EXIF with `HeadingRawSensorFrame: true`.
+- Stable heading averaging — `get_euler_stable()` collects 20 samples at 15 ms intervals, returns circular-mean heading, arithmetic-mean pitch/roll, and Mardia–Jupp circular std dev written to XMP as `HeadingStdDev`.
+- XMP quality tags — `CalibSys`, `CalibGyro`, `CalibAccel`, `CalibMag` embedded per image; allows post-hoc filtering of frames captured while magnetometer was uncalibrated.
+- Pitch/roll rotation matrix — `resolve_pitch_roll()` applies a 2-D rotation by `imu_mount_offset_deg` to EXIF pitch/roll, correctly handling arbitrary sensor mount angles (not just 0°/180°).
+- Two-stage calibration tooling — `bno055_calibration.py` Stage 1 (pre-mount hard-iron offsets) + Stage 2 (post-mount pole-influence validation) now in place; `docs/IMU_CALIBRATION.md` documents the field procedure.
 
 ---
 
@@ -54,33 +61,39 @@ After Step 1.1, re-run `aruco_gcp.py` detection + the pose-refinement path in `g
 
 Three independent IMU/mount issues have been identified and confirmed by field data. Each must be corrected before the heading contribution to RMSE can be assessed.
 
-### 2.1 BNO055 firmware 180° heading offset (Critical)
+### 2.1 BNO055 180° heading offset ✅ Addressed via pipeline (2026-06-24)
 
-**What:** The BNO055 on UFO-006 reports yaw values that are offset by approximately 180°. During the June 1 evening session, the IMU reported yaw = 0.0° (uninitialized) across all three captures. The morning pose refinement found an optimal heading of 69.48°; the true compass bearing (from RTK survey of two known points) is ~69–75°. The IMU is not contributing correct heading data to the pipeline.
+**What:** The BNO055 on UFO-006 reports yaw values that are offset by approximately 180°. During the June 1 evening session, the IMU reported yaw = 0.0° (uninitialized) across all three captures. The morning pose refinement found an optimal heading of 69.48°; the true compass bearing (from RTK survey of two known points) is ~69–75°.
 
-**Root cause confirmed (commit 94cbb5b):** The sensor is mounted rotated 180° from the expected orientation. The raw yaw requires the correction `heading = (raw_yaw + 180) % 360` before use.
+**Root cause confirmed (commit 94cbb5b):** The sensor is mounted rotated 180° from the expected orientation.
 
-**Fix:**
-1. Add `heading = (raw_yaw + 180) % 360` to the BNO055 orientation logger on the Raspberry Pi, applied before any EXIF write or CSV log entry.
-2. After firmware deployment, capture a test image and confirm the EXIF UserComment field contains a heading in the 60°–80° range (consistent with the RTK-derived bearing for the Meadowbrook-006 mount).
-3. Write the corrected heading to `unit_config_UFO006.json` under `heading_deg` and mark `heading_source: bno055_corrected`.
+**Resolution (pipeline approach, preferred over firmware fix):**
+- `unit_config_UFO006.json`: `imu_mount_offset_deg: 180.0`, `imu_magnetic_declination_deg: -12.5`
+- `resolve_heading()` applies `(raw_yaw + mount_offset + declination + correction) % 360` automatically whenever EXIF IMU yaw is the heading source
+- Raw sensor-frame heading is preserved in EXIF XMP (`HeadingRawSensorFrame: true`) — the correction is applied at processing time, not baked into the image
+- `imu_heading_correction_deg: 0.0` in unit config provides a per-node residual field to update after RTK bearing validation (§2.2)
 
-**Impact:** Without this fix, every image processed with IMU yaw input is using yaw = 0° (north) as the camera heading, which is wrong by ~70°. The 0.86 m residual was computed after manually correcting heading via pose refinement (to 69.48°), so the IMU error is not directly visible in that number — but without the firmware fix, production images will always require a manual pose-refinement step to recover the correct heading before any georeferencing is valid.
+This approach is preferable to a firmware fix because corrections are adjustable without firmware deployment and raw data is preserved for reprocessing.
 
-### 2.2 BNO055 magnetometer calibration (High priority, not yet done on any node)
+**Remaining validation:** After §2.2 magnetometer calibration and an RTK bearing check, update `imu_heading_correction_deg` with the observed residual and record the validated heading in the notes field.
 
-**What:** The full figure-8 calibration procedure for the magnetometer has not been completed on UFO-006 or any other node. Without calibration, the BNO055's heading accuracy is 2.5° RMS at best and may be significantly worse near ferromagnetic infrastructure.
+### 2.2 BNO055 magnetometer calibration — Tooling complete; field calibration pending
 
-**Fix:**
-1. Run `bno055_calibration.py` on the deployed unit while it is mounted in its final position (don't remove the box from the pole).
-2. Follow the three-stage sequence:
-   - Gyroscope: hold still for ~5 s
-   - Accelerometer: 6 stable orientations (point the box face-up, face-down, and toward each cardinal side)
-   - Magnetometer: slow figure-8 rotation in free air at the mounting height, away from the pole and box metal — approximately 2–3 figure-8 cycles until BNO055 calibration status = 3
-3. Save calibration offsets to disk (`calibration_offsets.json` per node) and configure the firmware to reload them on power cycle.
-4. After calibration, apply magnetic declination correction: Syracuse, NY declination ≈ −12.5° (west). Confirm by computing `heading_corrected = raw_heading + 12.5` and comparing against an RTK-derived bearing between two visible features.
+**What:** The full two-stage calibration procedure for the magnetometer has not been completed on UFO-006 or any other node. Without calibration, the BNO055's heading accuracy is 2.5° RMS at best and may be significantly worse near ferromagnetic infrastructure.
 
-**Expected improvement:** BNO055 specified 2.5° RMS heading after full calibration. At 13 m slant range to the marker plane, 2.5° heading error causes ~57 cm lateral displacement at the target. After calibration + declination correction, this drops toward the spec floor.
+**Tooling in place (2026-06-24):** `tools/bno055_calibration.py` implements a two-stage procedure (see `docs/IMU_CALIBRATION.md`):
+- **Stage 1** (pre-mount, bench): figure-8 gyroscope/accelerometer/magnetometer calibration; saves hard-iron offsets to `bno055_calibration.json`
+- **Stage 2** (post-mount, pole): `--mode mount` validates heading against a known RTK bearing, measures pole ferromagnetic influence, outputs residual for `imu_heading_correction_deg`
+- Offsets are automatically reloaded on boot via `_apply_calibration()` — no manual step needed after initial setup
+
+**Field procedure (still required):**
+1. Run Stage 1 on the bench before mounting: `python3 bno055_calibration.py`
+2. Follow figure-8 instructions until gyro=3, accel≥2, mag=3
+3. Mount unit on pole; run Stage 2: `python3 bno055_calibration.py --mode mount --rtk-bearing 70.5`
+4. Record the residual output and set `imu_heading_correction_deg` in `unit_config_UFO006.json`
+5. Verify: capture a test image and confirm XMP `Yaw` after pipeline correction is within 2° of the RTK-derived bearing
+
+**Expected improvement:** BNO055 specified 2.5° RMS heading after full calibration. At 13 m slant range, 2.5° heading error causes ~57 cm lateral displacement. After calibration + declination correction (already wired in), this drops toward the spec floor.
 
 ### 2.3 Camera mount stabilization
 
@@ -143,16 +156,19 @@ After Levels 1 and 2 are complete:
 
 ## Error Budget: Current vs. Target
 
-| Error source | Current | After Level 1 | After Level 2 | After Level 3 | Target |
+| Error source | Current (2026-06-24) | After Level 1 | After Level 2 | After Level 3 | Target |
 |---|---|---|---|---|---|
 | Ground truth uncertainty | ~0.8 m (Pix4DCatch marker std) | 1–3 cm (RTK direct) | 1–3 cm | 1–3 cm | ≤3 cm |
-| Heading error (BNO055) | ~70° wrong (offset not fixed) | ~70° wrong | ≤2.5° (~57 cm at 13 m) | ≤2.5° | ≤1° |
-| IMU magnetometer bias | Unknown (uncalibrated) | Unknown | ~2.5° RMS after cal | ~2.5° RMS | ≤1° |
-| Mount stability | 5.4° shift/session | 5.4° shift | <0.1° (rigid clamp) | <0.1° | <0.1° |
+| Heading error — mount offset | ✅ Corrected in pipeline (+180° via unit_config) | ✅ | ✅ | ✅ | ✅ |
+| Heading error — declination | ✅ Corrected in pipeline (−12.5° via unit_config) | ✅ | ✅ | ✅ | ✅ |
+| Heading error — mag bias | Unknown (magnetometer uncalibrated) | Unknown | ≤2.5° RMS after cal (~57 cm at 13 m) | ≤2.5° RMS | ≤1° |
+| Heading residual correction | 0.0° (not yet validated vs RTK bearing) | 0.0° | Set after §2.2 field cal | ✓ | ✓ |
+| Mount stability | 5.4° shift/session (friction fit) | 5.4° shift | <0.1° (rigid clamp) | <0.1° | <0.1° |
 | GCP pose refinement | Not enabled (2 GCPs only) | 2 GCPs | 2 GCPs | ≥4 GCPs → pose refined | ≥4 GCPs |
 | Node position | RTK-surveyed ✓ (2 cm H) | ✓ | ✓ | ✓ | ✓ |
 | Lens distortion | Corrected ✓ (0.278 px RMS cal) | ✓ | ✓ | ✓ | ✓ |
 | Terrain model | USGS 1 m DEM | USGS 1 m DEM | USGS 1 m DEM | Pix4DCatch DSM | Pix4DCatch DSM |
+| IMU data quality metadata | ✅ CalibSys/Mag/HeadingStdDev in XMP | ✅ | ✅ | ✅ | ✅ |
 
 The heading error (2.1 and 2.2) is the binding constraint after ground truth is fixed. At 13 m slant range, 2.5° heading uncertainty = ~57 cm lateral displacement. The IMU spec floor means the 5 cm target cannot be achieved from heading alone without GCP pose refinement or a better IMU (BNO085: 1.0° RMS → ~22 cm, still not 5 cm).
 
@@ -173,9 +189,9 @@ To close to 5 cm, GCP pose refinement (Level 3) with RTK GCPs is required in add
 
 ### Desk work (before field session, or immediately after)
 
-1. **First:** Add `heading = (raw_yaw + 180) % 360` correction to orientation firmware (§2.1) — this is the highest-impact desk task and unblocks every subsequent measurement
-2. Run DSM comparison using existing data (§Level 4) — no new field data needed; do this second while waiting for the next field slot
-3. Update `unit_config_UFO006.json` with RTK-surveyed marker positions after field session
+1. ~~**First:** Add `heading = (raw_yaw + 180) % 360` correction to orientation firmware (§2.1)~~ ✅ Done via pipeline (unit_config + resolve_heading)
+2. **Run DSM comparison using existing data (§Level 4)** — no new field data needed; only remaining desk task
+3. Update `unit_config_UFO006.json` with `imu_heading_correction_deg` residual after §2.2 field calibration
 
 ### After field session
 
@@ -189,15 +205,18 @@ To close to 5 cm, GCP pose refinement (Level 3) with RTK GCPs is required in add
 
 ## Files to Update as Each Step Completes
 
-| Step | File(s) to update |
-|---|---|
-| Geoid fix (done 2026-06-12) | `aruco_gcp.py` patched; regenerate any GCP CSVs from pre-fix sessions |
-| 2.1 IMU firmware fix | Raspberry Pi firmware commit; `unit_config_UFO006.json` (`heading_source: bno055_corrected`) |
-| 1.1 RTK marker survey | New `gcps_rtk_YYYYMMDD.csv` in repo root |
-| 2.2 Magnetometer calibration | `calibration_offsets_UFO006.json` (new); `unit_config_UFO006.json` |
-| 2.3 Mount clamp | `unit_config_UFO006.json` — add `mount_secured: true` and date |
-| 3.1–3.2 Pose refinement | `unit_config_UFO006.json` — update `heading_deg`, `pitch_deg`, `roll_deg` |
-| Level 4 DSM comparison | `docs/DSM_VALIDATION.md` — add displacement table |
+| Step | Status | File(s) to update |
+|---|---|---|
+| Geoid fix | ✅ 2026-06-12 | `aruco_gcp.py` patched; regenerate any GCP CSVs from pre-fix sessions |
+| 2.1 Mount offset + declination correction | ✅ 2026-06-24 | `unit_config_UFO006.json` updated; `resolve_heading()` applies corrections |
+| Stable heading averaging + XMP quality tags | ✅ 2026-06-24 | `bno055_imu.py`, `add_metadata.py` |
+| Pitch/roll rotation matrix | ✅ 2026-06-24 | `unit_config.py` `resolve_pitch_roll()` |
+| Two-stage calibration tooling | ✅ 2026-06-24 | `bno055_calibration.py`, `docs/IMU_CALIBRATION.md` |
+| 2.2 Magnetometer calibration (field) | ❌ Pending | `bno055_calibration.json` (new, per node); `unit_config_UFO006.json` (`imu_heading_correction_deg`) |
+| 2.3 Mount clamp (field) | ❌ Pending | `unit_config_UFO006.json` — add `mount_secured: true` and date in notes |
+| 1.1 RTK marker survey (field) | ❌ Pending | New `gcps_rtk_YYYYMMDD.csv` in repo root |
+| 3.1–3.2 Pose refinement (field + desk) | ❌ Pending | `unit_config_UFO006.json` — update `heading_deg`, `pitch_deg`, `roll_deg` after refinement |
+| Level 4 DSM comparison (desk) | ❌ Pending | `docs/DSM_VALIDATION.md` — create with displacement table |
 
 ---
 
