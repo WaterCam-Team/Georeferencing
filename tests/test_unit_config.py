@@ -79,34 +79,41 @@ class TestResolveHeading:
 
 
 class TestResolvePitchRoll:
-    def test_zero_offset_passthrough(self):
+    def test_zero_offset_negates_pitch_only(self):
+        # Raw EXIF pitch is negated to correct for the BNO055's native sign
+        # convention being opposite of camera_geometry.py's (confirmed via
+        # RTK-validated GCP refinement, 2026-07-15); roll's sign is untouched.
         cfg = _cfg({})
         pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, 3.0)
-        assert abs(pitch - 5.0) < 0.001
+        assert abs(pitch - (-5.0)) < 0.001
         assert abs(roll  - 3.0) < 0.001
         assert src == "exif_corrected"
 
-    def test_180_degree_negates_both(self):
+    def test_180_degree_pitch_unchanged_roll_negated(self):
+        # At 180°, the base pitch-sign correction and the mount-offset
+        # rotation's negation cancel out, so pitch ends up equal to the raw
+        # EXIF value; roll still flips as before.
         cfg = _cfg({"imu_mount_offset_deg": 180.0})
         pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, 3.0)
-        assert abs(pitch - (-5.0)) < 0.001
+        assert abs(pitch - 5.0) < 0.001
         assert abs(roll  - (-3.0)) < 0.001
         assert src == "exif_corrected"
 
     def test_90_degree_swaps_with_sign(self):
-        # θ=90°: pitch_out = -roll_in, roll_out = pitch_in
+        # θ=90°: pitch_out = -roll_in (unaffected by the base pitch-sign fix
+        # since it only depends on roll here), roll_out = -pitch_in
         cfg = _cfg({"imu_mount_offset_deg": 90.0})
         pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, 3.0)
         assert abs(pitch - (-3.0)) < 0.001
-        assert abs(roll  -   5.0)  < 0.001
+        assert abs(roll  - (-5.0)) < 0.001
         assert src == "exif_corrected"
 
     def test_270_degree_swaps_with_opposite_sign(self):
-        # θ=270°: pitch_out = roll_in, roll_out = -pitch_in
+        # θ=270°: pitch_out = roll_in (unaffected), roll_out = pitch_in
         cfg = _cfg({"imu_mount_offset_deg": 270.0})
         pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, 3.0)
         assert abs(pitch -   3.0)  < 0.001
-        assert abs(roll  - (-5.0)) < 0.001
+        assert abs(roll  -   5.0)  < 0.001
         assert src == "exif_corrected"
 
     def test_cli_wins_no_rotation_applied(self):
@@ -132,10 +139,11 @@ class TestResolvePitchRoll:
         assert src == "unit_config"
 
     def test_partial_exif_no_rotation(self):
-        # Only pitch in EXIF — cannot apply rotation, passes through
+        # Only pitch in EXIF — cannot apply mount-offset rotation, but the
+        # base pitch-sign correction still applies.
         cfg = _cfg({"imu_mount_offset_deg": 180.0})
         pitch, roll, src = cfg.resolve_pitch_roll(None, None, 5.0, None)
-        assert abs(pitch - 5.0) < 0.001
+        assert abs(pitch - (-5.0)) < 0.001
         assert roll == 0.0
         assert src == "exif"
 

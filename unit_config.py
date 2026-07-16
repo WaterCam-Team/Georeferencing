@@ -159,12 +159,39 @@ class UnitConfig:
         Return (pitch_deg, roll_deg, source_label).
         Source: 'cli' > 'unit_config' > 'exif_corrected' > 'exif' > 0.0
 
-        When both values come from EXIF, the mount rotation is applied:
-            corrected_pitch = exif_pitch * cos(θ) − exif_roll * sin(θ)
-            corrected_roll  = exif_pitch * sin(θ) + exif_roll * cos(θ)
-        where θ = imu_mount_offset_deg. This un-does the apparent pitch/roll
-        swap and sign flip introduced by mounting the sensor at an arbitrary
-        yaw angle relative to the camera body.
+        Raw EXIF pitch comes straight from the BNO055 hardware Euler register
+        (SU-WaterCam's bno055_imu.py / add_metadata.py write it unmodified,
+        by design). Its native sign convention is the OPPOSITE of this
+        module's (0deg=level, -90deg=straight down) — confirmed empirically
+        2026-07-15 via RTK-validated GCP refinement on two independent units
+        (imu_mount_offset_deg=0 and =180): the raw/passthrough pitch pointed
+        the camera above the horizon in both cases.
+
+        Root cause (confirmed 2026-07-16 against the Bosch datasheet,
+        BST-BNO055-DS000-18 rev1.8, Table 3-13 "Rotation angle conventions",
+        p.32, and the UNIT_SEL register default in the Page-0 register map,
+        ~p.56): the BNO055 has two selectable Euler output formats, Android
+        vs. Windows, and PITCH is defined with opposite sign between them
+        ("turning clockwise decreases values" in Android vs. "increases
+        values" in Windows). UNIT_SEL powers on to 0x80 (Android format,
+        bit 7 set) and the vendored `adafruit_bno055` driver never writes
+        UNIT_SEL, so the sensor stays in Android format — opposite of what
+        this module assumes. Roll and Heading/Yaw are explicitly
+        format-independent per the same table (identical convention in both
+        formats), which is why only pitch needs this correction; empirically
+        confirmed too (2026-07-16 roll-isolation test against RTK ground
+        truth showed no sign inversion for roll).
+
+        So raw EXIF pitch is negated first, before the mount-offset rotation
+        below is applied. Roll is left as-is.
+
+        When both values come from EXIF, the mount rotation is then applied:
+            corrected_pitch = pitch * cos(θ) − roll * sin(θ)
+            corrected_roll  = pitch * sin(θ) + roll * cos(θ)
+        where θ = imu_mount_offset_deg and pitch is the sign-corrected value
+        above. This un-does the apparent pitch/roll swap introduced by
+        mounting the sensor at an arbitrary yaw angle relative to the camera
+        body.
 
         CLI and unit_config values are assumed to already be in camera frame.
         """
@@ -180,7 +207,7 @@ class UnitConfig:
 
         if exif_pitch is not None and exif_roll is not None:
             theta = math.radians(self.imu_mount_offset_deg)
-            p = float(exif_pitch)
+            p = -float(exif_pitch)
             r = float(exif_roll)
             corrected_pitch = p * math.cos(theta) - r * math.sin(theta)
             corrected_roll  = p * math.sin(theta) + r * math.cos(theta)
@@ -188,7 +215,7 @@ class UnitConfig:
 
         # Partial EXIF — only one axis available, pass through without rotation
         if exif_pitch is not None:
-            return float(exif_pitch), 0.0, "exif"
+            return -float(exif_pitch), 0.0, "exif"
         if exif_roll is not None:
             return 0.0, float(exif_roll), "exif"
 
