@@ -7,7 +7,8 @@ Covers two distinct quality checks:
 
 Related docs: [PIX4DCATCH_DATA_FORMAT.md](PIX4DCATCH_DATA_FORMAT.md),
 [ACCURACY_AND_EXTERNAL_RESOURCES.md](ACCURACY_AND_EXTERNAL_RESOURCES.md),
-[GEOREFERENCING_PROCESS_DETAILED.md](GEOREFERENCING_PROCESS_DETAILED.md)
+[GEOREFERENCING_PROCESS_DETAILED.md](GEOREFERENCING_PROCESS_DETAILED.md),
+[BACKYARD_TEST_2026-07-15.md](BACKYARD_TEST_2026-07-15.md) (RTK-validated GCP refinement + a critical EXIF pitch-sign finding)
 
 ---
 
@@ -208,7 +209,58 @@ Random scatter → orientation noise + DSM resolution limit.
 
 ---
 
-## 3. Summary Checklist
+## 3. Level 4 — DSM Source Comparison
+
+Quantifies how much terrain-model choice (Pix4DCatch photogrammetric DSM vs.
+a national DEM) contributes to georeferenced position error, independent of
+IMU/GCP accuracy. Run via `scripts/flood_export.py` (added 2026-07-15):
+
+```bash
+.venv/bin/python scripts/flood_export.py \
+  --image Meadowbrook-006/20260426-090402-NIR-OFF.jpg \
+  --dsm-a output/pix4d/2026-04-24-13-11-52_dem.tif \
+  --dsm-b USGS_1M_18_x41y477_NY_FEMAR2_Central_2018_D19.tif \
+  --unit-config unit_config_UFO006.json
+```
+
+It samples a regular pixel grid over the image, ray-casts each point against
+both terrain sources, and reports the horizontal displacement between the
+two results, bucketed by slant range.
+
+### 3.1 Result (2026-07-15, Meadowbrook-006/UFO-006)
+
+This run was blocked until the EXIF pitch-sign bug was fixed (see
+`docs/BACKYARD_TEST_2026-07-15.md`) — before the fix, every ray missed the
+ground on both terrain sources (0/352 hits). After the fix:
+
+| | value |
+|---|---|
+| Grid points sampled | 352 (22×16, ~120px spacing) |
+| Points hitting both DSMs | 352 / 352 (100%) |
+| Mean displacement | 0.241 m |
+| Median displacement | 0.000 m |
+| 90th percentile | 0.478 m |
+| Max | 0.972 m |
+| Slant range of all points | < 10 m (camera mount is only 0.84 m AGL, tilted 33.75° down) |
+
+**Interpretation:** at close range (<10 m, all this photo's footprint
+covers), DSM choice contributes on the order of a few tens of cm on
+average, up to ~1 m at the tail — meaningful relative to the 5cm design
+target, but the median of 0.000 m suggests much of that is the USGS DEM's
+1m grid resolution snapping nearby points to the same cell rather than a
+systematic bias.
+
+**Limitation:** this photo's footprint is entirely close-range (<10 m) —
+the low, steeply-downward-tilted mount doesn't reach the 10–20 m /
+road-crown-and-curb range the accuracy plan's Level 4 was specifically
+designed to characterize (§Level 4 in `ACCURACY_IMPROVEMENT_PLAN.md`:
+"DSM choice matters most at road-crown and curb features"). A photo with a
+farther, shallower view (or a different capture from this site) would be
+needed to test that scenario specifically.
+
+---
+
+## 4. Summary Checklist
 
 ### DSM
 - [ ] `validate_dsm.py` reports all PASS

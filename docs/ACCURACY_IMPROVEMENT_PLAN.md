@@ -13,6 +13,8 @@
 - Pitch/roll rotation matrix — `resolve_pitch_roll()` applies a 2-D rotation by `imu_mount_offset_deg` to EXIF pitch/roll, correctly handling arbitrary sensor mount angles (not just 0°/180°).
 - Two-stage calibration tooling — `bno055_calibration.py` Stage 1 (pre-mount hard-iron offsets) + Stage 2 (post-mount pole-influence validation) now in place; `docs/IMU_CALIBRATION.md` documents the field procedure.
 
+**✅ Fixed (2026-07-15) — EXIF pitch sign convention was inverted.** Confirmed independently on the UFO-006 field photo *and* a controlled RTK-validated backyard test (`imu_mount_offset_deg=0`, no mount-offset formula involved at all): raw EXIF pitch uses the opposite sign from what `camera_geometry.py`/`resolve_pitch_roll()`/`refine_pose_from_gcps()` assume (`0°=level, -90°=down`). As currently written, resolved pitch points the camera *above* the horizon for real ground-facing photos on both units — `validate_georef.py` and `refine_pose_from_gcps()`'s own bounds both independently reject the result. This affects every unit, not just 180°-mount ones, and is upstream of the mount-offset negation formula (§2.1 above is not what's wrong). **Root cause confirmed by code inspection**: SU-WaterCam's capture code (`tools/bno055_imu.py`/`tools/add_metadata.py`) is working as designed — it deliberately writes the BNO055's raw, unmodified hardware Euler pitch straight to EXIF, by documented intent, for this pipeline to correct downstream. The actual gap was that **this repo's own `unit_config.py` `resolve_pitch_roll()`** never added that base sign correction — it only rotated for mount offset, it didn't reconcile the hardware's native pitch polarity with `camera_geometry.py`'s convention. **Fixed** by negating raw EXIF pitch before the existing mount-offset rotation is applied (`unit_config.py`, `resolve_pitch_roll()`); `tests/test_unit_config.py` updated to match; validated against real data — `validate_georef.py` on the UFO-006 Meadowbrook-006 photo now hits 49/49 grid pixels (was 0/49 before the fix). **Definitive root cause confirmed 2026-07-16** against the Bosch datasheet (`Docs/instructions/bst-bno055-ds000.pdf`, Table 3-13 p.32): the BNO055 has two selectable Euler formats, Android vs. Windows, with pitch defined at *opposite sign* between them; `UNIT_SEL` powers on to Android format (0x80) and the vendored `adafruit_bno055` driver never changes it, so the sensor stays opposite of what this pipeline assumes. Roll and Heading/Yaw are explicitly format-independent per the same table — confirmed both by the datasheet and by an empirical roll-isolation test (2026-07-16, no evidence of inversion), so roll is left unchanged. GCP pose refinement checks out with the fix in place (RTK-consistent pose, sub-30cm residuals on cleanly-labeled markers) — see full writeup in `docs/BACKYARD_TEST_2026-07-15.md`.
+
 ---
 
 ## Overview
@@ -135,22 +137,31 @@ After Levels 1 and 2 are complete:
 
 ---
 
-## Level 4 — DSM Source Comparison (Desk Work)
+## Level 4 — DSM Source Comparison (Desk Work) ✅ Done 2026-07-15 (partial — close-range only)
 
-**What:** Georeference the same flood mask boundary pixels using two terrain models:
-- **DSM-A:** Pix4DCatch photogrammetric DSM, 1–3 cm accuracy
-- **DSM-B:** USGS 1 m DEM, available at repo root as `USGS_1M_18_x40y477_NY_FEMAR2_Central_2018_D19.tif`
+**What:** Georeference a grid of image points using two terrain models:
+- **DSM-A:** Pix4DCatch photogrammetric DSM (`output/pix4d/2026-04-24-13-11-52_dem.tif` — the OPF that actually covers Meadowbrook-006; the `2026-06-01-*` session named in the original plan below covers a different site ~13 km away and was not usable here)
+- **DSM-B:** USGS 1 m DEM (`USGS_1M_18_x41y477_NY_FEMAR2_Central_2018_D19.tif` — note: the `x40y477` tile named below does not cover this site; `x41y477` does)
 
 **Why:** The current error budget (georef_workplan.md §4) predicts that DSM choice matters most at road-crown and curb features. Empirically demonstrating the displacement between DSM-A and DSM-B results answers whether the ground-survey effort is necessary for future node installations or whether the national DEM is sufficient given other error sources.
 
-**Steps:**
-1. Process the June 1 scan (`2026-06-01-18-25-23` or another OPF with good coverage) through `scripts/pix4d_to_las_dem.py` to produce `dsm_a.tif`.
+**Result (`scripts/flood_export.py`, Meadowbrook-006/UFO-006 photo, 352-point grid, 2026-07-15):**
+mean displacement **0.241 m**, median **0.000 m**, p90 **0.478 m**, max **0.972 m** — all points within the photo's slant range (<10 m, since the mount is only 0.84 m AGL at 33.75° down-tilt). Full detail and interpretation in `docs/DSM_VALIDATION.md` §3. This run was blocked until the EXIF pitch-sign bug was fixed (see `docs/BACKYARD_TEST_2026-07-15.md`) — before the fix, every ray missed the ground on both terrain sources.
+
+**Not yet done:** this photo's footprint doesn't reach the 10–20 m road-crown/curb range the "why" above specifically asks about — that needs a farther/shallower-angle photo from this or another node to actually test the hypothesis. Original steps below kept for reference:
+
+<details>
+<summary>Original steps (superseded — see result above)</summary>
+
+1. ~~Process the June 1 scan (`2026-06-01-18-25-23` or another OPF with good coverage) through `scripts/pix4d_to_las_dem.py` to produce `dsm_a.tif`.~~ (wrong site — see note above)
 2. Georeference a representative image (or flood mask boundary) twice using `georeference_terrain.py`:
    - Run 1: `--dem dsm_a.tif`
    - Run 2: `--dem USGS_1M_18_x40y477_NY_FEMAR2_Central_2018_D19.tif`
 3. Export both outputs as GeoJSON via `scripts/flood_export.py`.
 4. In QGIS or geopandas, compute boundary displacement between the two extents at multiple points. Focus on curb-face crossings.
 5. Record mean and 90th-percentile displacement. This becomes the "terrain model contribution" row in the error budget table.
+
+</details>
 
 ---
 
@@ -167,7 +178,7 @@ After Levels 1 and 2 are complete:
 | GCP pose refinement | Not enabled (2 GCPs only) | 2 GCPs | 2 GCPs | ≥4 GCPs → pose refined | ≥4 GCPs |
 | Node position | RTK-surveyed ✓ (2 cm H) | ✓ | ✓ | ✓ | ✓ |
 | Lens distortion | Corrected ✓ (0.278 px RMS cal) | ✓ | ✓ | ✓ | ✓ |
-| Terrain model | USGS 1 m DEM | USGS 1 m DEM | USGS 1 m DEM | Pix4DCatch DSM | Pix4DCatch DSM |
+| Terrain model | USGS 1 m DEM — measured contribution 0.24 m mean / 0.48 m p90 at <10 m range (2026-07-15, close-range only; not yet measured at 10-20m/curb range) | USGS 1 m DEM | USGS 1 m DEM | Pix4DCatch DSM | Pix4DCatch DSM |
 | IMU data quality metadata | ✅ CalibSys/Mag/HeadingStdDev in XMP | ✅ | ✅ | ✅ | ✅ |
 
 The heading error (2.1 and 2.2) is the binding constraint after ground truth is fixed. At 13 m slant range, 2.5° heading uncertainty = ~57 cm lateral displacement. The IMU spec floor means the 5 cm target cannot be achieved from heading alone without GCP pose refinement or a better IMU (BNO085: 1.0° RMS → ~22 cm, still not 5 cm).
@@ -190,7 +201,7 @@ To close to 5 cm, GCP pose refinement (Level 3) with RTK GCPs is required in add
 ### Desk work (before field session, or immediately after)
 
 1. ~~**First:** Add `heading = (raw_yaw + 180) % 360` correction to orientation firmware (§2.1)~~ ✅ Done via pipeline (unit_config + resolve_heading)
-2. **Run DSM comparison using existing data (§Level 4)** — no new field data needed; only remaining desk task
+2. ~~**Run DSM comparison using existing data (§Level 4)** — no new field data needed; only remaining desk task~~ ✅ Done 2026-07-15 (close-range only; 10-20m/curb range still open)
 3. Update `unit_config_UFO006.json` with `imu_heading_correction_deg` residual after §2.2 field calibration
 
 ### After field session
@@ -216,7 +227,9 @@ To close to 5 cm, GCP pose refinement (Level 3) with RTK GCPs is required in add
 | 2.3 Mount clamp (field) | ❌ Pending | `unit_config_UFO006.json` — add `mount_secured: true` and date in notes |
 | 1.1 RTK marker survey (field) | ❌ Pending | New `gcps_rtk_YYYYMMDD.csv` in repo root |
 | 3.1–3.2 Pose refinement (field + desk) | ❌ Pending | `unit_config_UFO006.json` — update `heading_deg`, `pitch_deg`, `roll_deg` after refinement |
-| Level 4 DSM comparison (desk) | ❌ Pending | `docs/DSM_VALIDATION.md` — create with displacement table |
+| Level 4 DSM comparison (desk) | ✅ 2026-07-15 (partial, close-range only) | `docs/DSM_VALIDATION.md` §3 — displacement table added |
+| EXIF pitch sign fix (new finding, 2026-07-15) | ✅ 2026-07-15 | `unit_config.py` `resolve_pitch_roll()` (this repo); `tests/test_unit_config.py` updated — see `docs/BACKYARD_TEST_2026-07-15.md` |
+| Backyard RTK validation of GCP refinement | ✅ 2026-07-15 (partial — 3/5 markers) | `docs/BACKYARD_TEST_2026-07-15.md` |
 
 ---
 
