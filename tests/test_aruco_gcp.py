@@ -21,7 +21,7 @@ def _make_session(tmp_path: Path, geoid_sep: float | None) -> Path:
     geolocations.mkdir()
 
     # Minimal input_cameras.json — one capture, camera pointing straight down
-    cap_lat, cap_lon, cap_alt_ellip = 43.15814, -76.13810, 87.0
+    cap_lat, cap_lon, cap_alt_ellip = 40.71280, -74.00600, 87.0
     input_cameras = {
         "version": "1.0",
         "format": "application/opf-input-cameras+json",
