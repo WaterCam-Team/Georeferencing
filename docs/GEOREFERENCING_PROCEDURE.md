@@ -209,13 +209,13 @@ When the scene is **not flat**, use **`georeference_terrain.py`** so that rays a
 
 2. **Run:**  
    ```bash
-   python georeference_terrain.py path/to/photo.jpg --dem path/to/dem.tif --lat 43.04 --lon -76.13 --elev 120 --heading 90 --pitch -15
+   python georeference_terrain.py path/to/photo.jpg --dem path/to/dem.tif --lat 40.71 --lon -74.01 --elev 120 --heading 90 --pitch -15
    ```  
    Camera elevation must be consistent with the DEM (e.g. orthometric if the DEM is orthometric).  
 
 3. **Datum-safe elevation:** To avoid mixing EXIF altitude with DEM datum, use **`--height-above-ground`** instead of `--elev` when you have terrain data. The tool then sets camera elevation = DEM elevation at the camera + height above ground (see `geo_core.camera_elev_from_dem`). Example:  
    ```bash
-   python georeference_terrain.py photo.jpg --dem dem.tif --lat 43.04 --lon -76.13 --height-above-ground 4.0 --pitch -15
+   python georeference_terrain.py photo.jpg --dem dem.tif --lat 40.71 --lon -74.01 --height-above-ground 4.0 --pitch -15
    ```
 
 4. **Output:** Click-to-GPS with **elevation** from the terrain; optional CSV of points with (lat, lon, elev).

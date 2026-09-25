@@ -53,7 +53,7 @@ def test_fit_tps_returns_callable_for_six_gcps():
 def test_refine_pose_with_consistent_gcps():
     """With GCPs generated from a known pose, refinement should recover that pose."""
     K = np.array([[2000, 0, 960], [0, 2000, 540], [0, 0, 1]], dtype=np.float64)
-    cam_lat, cam_lon = 43.05, -76.12
+    cam_lat, cam_lon = 40.71, -74.01
     height = 5.0
     heading, pitch, roll = 10.0, -60.0, 0.0
     R_true = build_rotation_matrix(heading, pitch, roll)
