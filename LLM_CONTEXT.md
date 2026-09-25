@@ -69,7 +69,6 @@ Shared math for flat ground: `geo_core.py` (pixel ray → ENU → `pyproj` local
 | `reconstruct3d.py` | 3D reconstruction utilities (see file). |
 | `laz-viewer.py` | Point cloud viewing helper. |
 | `add_imu.py` | Write Roll/Pitch/Yaw into EXIF UserComment. |
-| `calibration-checkerboard.py` | On-device / Pi-oriented checkerboard capture (if used in your workflow). |
 | `scripts/dump_dataset_crs.py` | CLI helper: CRS, bounds, nodata, vertical hint (raster), CRS + Z range (LAS/LAZ) — use before new sites. |
 | `scripts/pix4d_to_las_dem.py` | Convert Pix4DCatch OPF scan dir → LAZ + DEM GeoTIFF + camera-pose CSV. See `docs/PIX4DCATCH_DATA_FORMAT.md`. |
 
