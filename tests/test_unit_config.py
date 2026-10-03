@@ -153,3 +153,32 @@ class TestResolvePitchRoll:
         assert pitch == 0.0
         assert roll  == 0.0
         assert src == "default"
+
+
+class TestResolvePosition:
+    # Synthetic coordinates only: real surveyed positions are site data.
+    SURVEYED = {"camera_lat": 43.0, "camera_lon": -76.0}
+
+    def test_cli_wins_over_everything(self):
+        cfg = _cfg(self.SURVEYED)
+        assert cfg.resolve_position(43.5, -76.5, 43.1, -76.1) == (43.5, -76.5, "cli")
+
+    def test_surveyed_position_wins_over_exif(self):
+        cfg = _cfg(self.SURVEYED)
+        assert cfg.resolve_position(None, None, 43.1, -76.1) == (43.0, -76.0, "unit_config")
+
+    def test_falls_back_to_exif(self):
+        assert _cfg({}).resolve_position(None, None, 43.1, -76.1) == (43.1, -76.1, "exif")
+
+    def test_half_a_cli_position_is_ignored(self):
+        cfg = _cfg(self.SURVEYED)
+        assert cfg.resolve_position(43.5, None, 43.1, -76.1) == (43.0, -76.0, "unit_config")
+
+    def test_nothing_known(self):
+        assert _cfg({}).resolve_position(None, None) == (None, None, "none")
+
+    def test_position_fields_are_known_and_not_echoed(self, capsys):
+        cfg = _cfg({**self.SURVEYED, "camera_alt_ellipsoid_m": 87.0})
+        assert "Unknown fields" not in capsys.readouterr().out
+        assert cfg.camera_alt_ellipsoid_m == 87.0
+        assert "43.0" not in cfg.summary() and "position=surveyed" in cfg.summary()
