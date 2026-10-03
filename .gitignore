@@ -281,3 +281,12 @@ Meadowbrook-*/
 *.mp4
 *.dem
 mesh.obj
+
+# --- site data: surveyed positions, GCP marker coordinates, personal documents ---
+# Keep these local and never push them. Real surveyed camera positions belong in
+# a local unit_config_<unit>_surveyed.json, not in a committed unit config.
+private/
+gcps_*.csv
+unit_config_*_surveyed.json
+INDEPENDENT_STUDY_REPORT.md
+*.docx
