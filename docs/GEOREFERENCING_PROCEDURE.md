@@ -69,7 +69,8 @@ Camera calibration estimates the **intrinsic** parameters (focal length, princip
 
 **Option B — On-device (e.g. Raspberry Pi with BNO055):**
 
-- Use **`SU-WaterCam/tools/calibrate_node.py`**, which runs on the node: it captures through `rpicam-still`, checks each frame for corners before you move on, reports how much of the frame the board has covered, runs the calibration, and installs the result to `SU-WaterCam/config/camera_calibration.json` stamped with the node name and date. It defaults to the calib.io target in use here, 24x17 interior corners with 30 mm squares.
+- Use **`tools/calibrate_node.py` in the [SU-WaterCam repository](https://github.com/mandeeps/SU-WaterCam/blob/main/tools/calibrate_node.py)** (it ships with the node software, not with this repo), which runs on the node: it captures through `rpicam-still`, checks each frame for corners before you move on, reports how much of the frame the board has covered, runs the calibration, and installs the result to `SU-WaterCam/config/camera_calibration.json` stamped with the node name and date. It defaults to the calib.io target in use here, 24x17 interior corners with 30 mm squares.
+- Without a node, use Option A above: `camera_calibration.py` in this repo calibrates from a folder of images on the desktop.
 - This replaced `calibration-checkerboard.py`, which was removed. That script was fixed at a 9x6 board and so could not detect the calib.io target, and it wrote a `.npz` rather than the JSON the pipeline reads.
 
 ### 2.3 Running calibration
