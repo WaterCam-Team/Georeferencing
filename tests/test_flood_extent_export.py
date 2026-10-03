@@ -221,14 +221,14 @@ def test_export_csv_writes_all_points(tmp_path):
 
 
 def test_export_csv_values_roundtrip(tmp_path):
-    pts = [{"lat": 43.123456, "lon": -76.654321, "elev_m": 110.5, "slant_range_m": 25.3}]
+    pts = [{"lat": 40.712345, "lon": -74.006789, "elev_m": 110.5, "slant_range_m": 25.3}]
     out = tmp_path / "pts.csv"
     export_csv(pts, out)
     import csv as _csv
     with open(out, newline="") as f:
         rows = list(_csv.DictReader(f))
-    assert float(rows[0]["lat"]) == pytest.approx(43.123456, abs=1e-5)
-    assert float(rows[0]["lon"]) == pytest.approx(-76.654321, abs=1e-5)
+    assert float(rows[0]["lat"]) == pytest.approx(40.712345, abs=1e-5)
+    assert float(rows[0]["lon"]) == pytest.approx(-74.006789, abs=1e-5)
 
 
 def test_main_end_to_end_with_surveyed_position(tmp_path, monkeypatch):
