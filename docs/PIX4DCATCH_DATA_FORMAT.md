@@ -82,7 +82,7 @@ alongside its extracted directory.
 - **Transform**: `utm_xyz = local_xyz - shift`
   - Equivalently: add `[+404503, +4768704, +80]` to every local coordinate.
 - The local origin sits at approximately UTM E 404503, N 4768704, Z 80 m
-  (lat ≈ 43.0651°, lon ≈ -76.1730°, Syracuse NY area).
+  (lat ≈ 40.7128°, lon ≈ -74.0060°; placeholder, not a deployment site).
 
 ### Vertical datum
 

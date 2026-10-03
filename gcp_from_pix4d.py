@@ -17,7 +17,7 @@ Usage:
     python gcp_from_pix4d.py <session_dir> --frame Image_001418.jpg [--out gcps_rtk.csv]
 
     # Or let the script find the closest frame to a given location:
-    python gcp_from_pix4d.py <session_dir> --near-lat 43.039783 --near-lon -76.082819 --n 5
+    python gcp_from_pix4d.py <session_dir> --near-lat 40.712800 --near-lon -74.006000 --n 5
 
 Keyboard shortcuts (OpenCV window):
     Left-click   : extract RTK coordinate at clicked pixel

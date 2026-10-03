@@ -270,6 +270,18 @@ georef_workplan.md
 *_viewer.html
 docs/paper/main.pdf
 
+# --- Field imagery and survey captures. Never commit. ------------------------
+# These directories hold photographs taken at deployment sites. Frames captured
+# on a node carry GPS and IMU in EXIF, and site imagery is location data in its
+# own right. Nothing here is tracked today; this keeps it that way.
+Calibration Data/
+Backyard */
+Meadowbrook-*/
+[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]/
+*.mp4
+*.dem
+mesh.obj
+
 # --- site data: surveyed positions, GCP marker coordinates, personal documents ---
 # Keep these local and never push them. Real surveyed camera positions belong in
 # a local unit_config_<unit>_surveyed.json, not in a committed unit config.

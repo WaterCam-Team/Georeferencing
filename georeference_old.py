@@ -615,8 +615,8 @@ if __name__ == "__main__":
 
     # Camera position — from EXIF or manual entry
     # Leave as None to read from image EXIF automatically
-    CAMERA_LAT  = None        # e.g. 43.0384     (decimal degrees)
-    CAMERA_LON  = None        # e.g. -76.1340
+    CAMERA_LAT  = None        # e.g. 40.7128     (decimal degrees)
+    CAMERA_LON  = None        # e.g. -74.0060
     CAMERA_ALT  = None        # meters above sea level (used as height if below not set)
 
     # Camera orientation — from IMU log or manual measurement

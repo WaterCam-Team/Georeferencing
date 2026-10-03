@@ -69,7 +69,9 @@ Camera calibration estimates the **intrinsic** parameters (focal length, princip
 
 **Option B — On-device (e.g. Raspberry Pi with BNO055):**
 
-- Use **`calibration-checkerboard.py`** if available: it captures images with libcamera, records GPS (via gpsd) and IMU (BNO055) per frame, and can run OpenCV calibration on the detected corners. Checkerboard dimensions and square size in that script must match your printed board.
+- Use **`tools/calibrate_node.py` in the [SU-WaterCam repository](https://github.com/mandeeps/SU-WaterCam/blob/main/tools/calibrate_node.py)** (it ships with the node software, not with this repo), which runs on the node: it captures through `rpicam-still`, checks each frame for corners before you move on, reports how much of the frame the board has covered, runs the calibration, and installs the result to `SU-WaterCam/config/camera_calibration.json` stamped with the node name and date. It defaults to the calib.io target in use here, 24x17 interior corners with 30 mm squares.
+- Without a node, use Option A above: `camera_calibration.py` in this repo calibrates from a folder of images on the desktop.
+- This replaced `calibration-checkerboard.py`, which was removed. That script was fixed at a 9x6 board and so could not detect the calib.io target, and it wrote a `.npz` rather than the JSON the pipeline reads.
 
 ### 2.3 Running calibration
 
@@ -208,13 +210,13 @@ When the scene is **not flat**, use **`georeference_terrain.py`** so that rays a
 
 2. **Run:**  
    ```bash
-   python georeference_terrain.py path/to/photo.jpg --dem path/to/dem.tif --lat 43.04 --lon -76.13 --elev 120 --heading 90 --pitch -15
+   python georeference_terrain.py path/to/photo.jpg --dem path/to/dem.tif --lat 40.71 --lon -74.01 --elev 120 --heading 90 --pitch -15
    ```  
    Camera elevation must be consistent with the DEM (e.g. orthometric if the DEM is orthometric).  
 
 3. **Datum-safe elevation:** To avoid mixing EXIF altitude with DEM datum, use **`--height-above-ground`** instead of `--elev` when you have terrain data. The tool then sets camera elevation = DEM elevation at the camera + height above ground (see `geo_core.camera_elev_from_dem`). Example:  
    ```bash
-   python georeference_terrain.py photo.jpg --dem dem.tif --lat 43.04 --lon -76.13 --height-above-ground 4.0 --pitch -15
+   python georeference_terrain.py photo.jpg --dem dem.tif --lat 40.71 --lon -74.01 --height-above-ground 4.0 --pitch -15
    ```
 
 4. **Output:** Click-to-GPS with **elevation** from the terrain; optional CSV of points with (lat, lon, elev).
