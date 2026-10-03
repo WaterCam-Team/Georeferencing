@@ -18,14 +18,27 @@ Unit config JSON schema
   "unit_id":            "UFO-006",        // human identifier
   "calibration":        "./calibration.json",
   "mount_height_m":     0.8382,           // camera height above ground (m); null = derive from EXIF altitude
-  "heading_deg":        265.0,            // fixed mount heading (deg, 0=N); null = use EXIF Yaw
+  "camera_lat":         null,             // surveyed camera latitude (WGS84 deg); null = use EXIF GPS
+  "camera_lon":         null,             // surveyed camera longitude (WGS84 deg); null = use EXIF GPS
+  "camera_alt_ellipsoid_m": null,         // surveyed camera altitude above the WGS84 ellipsoid (m)
+  "heading_deg":        null,             // fixed true heading (deg, 0=N); null = use EXIF Yaw + IMU corrections
   "pitch_deg":          null,             // fixed mount pitch; null = use EXIF Pitch
   "roll_deg":           null,             // fixed mount roll;  null = use EXIF Roll
   "camera_elev_datum":  "wgs84_ellipsoid",// datum of GPS altitude from this unit's GPS module
-  "notes":              ""               // free-text description
+  "notes":              "",              // free-text description
+
+  // IMU / BNO055 fields — applied to EXIF Yaw in resolve_heading() only
+  "imu_mount_offset_deg":         180.0,  // physical sensor rotation relative to camera body
+  "imu_magnetic_declination_deg": -12.5,  // site declination, positive = East (Syracuse NY ≈ -12.5)
+  "imu_heading_correction_deg":   0.0,    // residual error from post-mount validation; update after Stage 2
+  "imu_calibration_file":         "./bno055_calibration.json"  // offset file path (informational)
 }
 
 Fields set to null (or omitted) are filled from EXIF or left at script defaults.
+heading_deg takes precedence over EXIF — set to null to allow IMU corrections to flow through.
+
+A surveyed camera position is site data: keep real values in local, gitignored
+config files, never in a committed one.
 """
 
 from __future__ import annotations
@@ -39,6 +52,7 @@ from typing import Any, Optional
 _REQUIRED_FIELDS: list[str] = []          # none strictly required
 _KNOWN_FIELDS: set[str] = {
     "unit_id", "calibration", "mount_height_m",
+    "camera_lat", "camera_lon", "camera_alt_ellipsoid_m",
     "heading_deg", "pitch_deg", "roll_deg",
     "camera_elev_datum", "notes",
     # IMU / BNO055 fields
@@ -69,6 +83,21 @@ class UnitConfig:
     @property
     def mount_height_m(self) -> Optional[float]:
         v = self._d.get("mount_height_m")
+        return float(v) if v is not None else None
+
+    @property
+    def camera_lat(self) -> Optional[float]:
+        v = self._d.get("camera_lat")
+        return float(v) if v is not None else None
+
+    @property
+    def camera_lon(self) -> Optional[float]:
+        v = self._d.get("camera_lon")
+        return float(v) if v is not None else None
+
+    @property
+    def camera_alt_ellipsoid_m(self) -> Optional[float]:
+        v = self._d.get("camera_alt_ellipsoid_m")
         return float(v) if v is not None else None
 
     @property
@@ -125,6 +154,26 @@ class UnitConfig:
         if not os.path.isabs(path):
             path = os.path.join(config_dir, path)
         return os.path.normpath(path)
+
+    def resolve_position(self,
+                         cli_lat: Optional[float], cli_lon: Optional[float],
+                         exif_lat: Optional[float] = None,
+                         exif_lon: Optional[float] = None,
+                         ) -> tuple[Optional[float], Optional[float], str]:
+        """
+        Return (lat, lon, source_label).
+        Source: 'cli' > 'unit_config' > 'exif' > (None, None, 'none')
+
+        A surveyed position in the unit config (RTK, ~cm) beats the unit's own
+        GPS fix in EXIF (several metres of noise).
+        """
+        if cli_lat is not None and cli_lon is not None:
+            return float(cli_lat), float(cli_lon), "cli"
+        if self.camera_lat is not None and self.camera_lon is not None:
+            return self.camera_lat, self.camera_lon, "unit_config"
+        if exif_lat is not None and exif_lon is not None:
+            return float(exif_lat), float(exif_lon), "exif"
+        return None, None, "none"
 
     def resolve_heading(self, cli_override: Optional[float],
                         exif_yaw: Optional[float],
@@ -238,6 +287,9 @@ class UnitConfig:
             parts.append(f"unit={self.unit_id}")
         if self.mount_height_m is not None:
             parts.append(f"mount={self.mount_height_m:.4f}m")
+        if self.camera_lat is not None and self.camera_lon is not None:
+            # Don't echo the coordinates: this line ends up in shared logs.
+            parts.append("position=surveyed")
         if self.heading_deg is not None:
             parts.append(f"heading={self.heading_deg:.1f}°")
         if self.pitch_deg is not None:
