@@ -293,3 +293,11 @@ private/
 unit_config_*_surveyed.json
 INDEPENDENT_STUDY_REPORT.md
 *.docx
+
+# Private: field-test write-ups, the paper and its figure scripts, local
+# validation reports and tool config. Kept locally, never pushed.
+docs/BACKYARD_TEST_*.md
+docs/paper/
+make_fig_*.py
+georef-validation-report*.html
+.mcp.json

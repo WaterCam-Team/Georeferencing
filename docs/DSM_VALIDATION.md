@@ -8,7 +8,7 @@ Covers two distinct quality checks:
 Related docs: [PIX4DCATCH_DATA_FORMAT.md](PIX4DCATCH_DATA_FORMAT.md),
 [ACCURACY_AND_EXTERNAL_RESOURCES.md](ACCURACY_AND_EXTERNAL_RESOURCES.md),
 [GEOREFERENCING_PROCESS_DETAILED.md](GEOREFERENCING_PROCESS_DETAILED.md),
-[BACKYARD_TEST_2026-07-15.md](BACKYARD_TEST_2026-07-15.md) (RTK-validated GCP refinement + a critical EXIF pitch-sign finding)
+the backyard test notes (kept locally) (RTK-validated GCP refinement + a critical EXIF pitch-sign finding)
 
 ---
 
@@ -230,7 +230,7 @@ two results, bucketed by slant range.
 ### 3.1 Result (2026-07-15, Meadowbrook-006/UFO-006)
 
 This run was blocked until the EXIF pitch-sign bug was fixed (see
-`docs/BACKYARD_TEST_2026-07-15.md`) — before the fix, every ray missed the
+the backyard test notes, kept locally) — before the fix, every ray missed the
 ground on both terrain sources (0/352 hits). After the fix:
 
 | | value |
