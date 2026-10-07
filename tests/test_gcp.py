@@ -19,8 +19,8 @@ from gcp import (
 
 def test_gcp_save_load_roundtrip():
     gcps = [
-        GroundControlPoint("A", 100.0, 200.0, 43.0, -76.0, None),
-        GroundControlPoint("B", 300.0, 400.0, 43.001, -75.999, 120.5),
+        GroundControlPoint("A", 100.0, 200.0, 40.0, -74.0, None),
+        GroundControlPoint("B", 300.0, 400.0, 40.001, -73.999, 120.5),
     ]
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
         path = f.name
@@ -29,7 +29,7 @@ def test_gcp_save_load_roundtrip():
         loaded = load_gcps(path)
         assert len(loaded) == 2
         assert loaded[0].label == "A"
-        assert loaded[0].pixel_u == 100.0 and loaded[0].lat == 43.0
+        assert loaded[0].pixel_u == 100.0 and loaded[0].lat == 40.0
         assert loaded[1].elev_m == 120.5
     finally:
         Path(path).unlink(missing_ok=True)
@@ -93,9 +93,9 @@ def test_gcp_residuals():
     # Straight-down camera so image centre = nadir
     K = np.array([[2000, 0, 960], [0, 2000, 540], [0, 0, 1]], dtype=np.float64)
     R = build_rotation_matrix(0, -90, 0)  # -90 = straight down
-    cam_lat, cam_lon, height = 43.0, -76.0, 4.0
+    cam_lat, cam_lon, height = 40.0, -74.0, 4.0
     gcps = [
-        GroundControlPoint("C", 960, 540, 43.0, -76.0, None),  # centre = nadir
+        GroundControlPoint("C", 960, 540, 40.0, -74.0, None),  # centre = nadir
     ]
     res = gcp_residuals(K, R, cam_lat, cam_lon, height, gcps)
     assert len(res) == 1

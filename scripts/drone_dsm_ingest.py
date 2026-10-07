@@ -27,7 +27,8 @@ Most drone tools embed only a 2D horizontal CRS; the vertical convention is:
   DroneDeploy       | WGS84 ellipsoidal
 
 Pass --terrain-vertical-datum to georeference_terrain.py accordingly.
-Syracuse NY geoid separation (WGS84 ellipsoid → NAVD88): ≈ +34 m.
+Geoid separation (WGS84 ellipsoid → NAVD88) is site-dependent: ≈ +34 m
+across much of the north-eastern US.
 
 Requires: rasterio, numpy, pyproj
 """

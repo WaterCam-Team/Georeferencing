@@ -1,23 +1,23 @@
 """
-Level 4 DSM source comparison (docs/ACCURACY_IMPROVEMENT_PLAN.md)
-==================================================================
+DSM source comparison
+=====================
 Georeferences the same fixed-camera photo twice — once against a
 Pix4DCatch photogrammetric DSM, once against a national DEM (e.g. USGS
 1 m) — and reports the horizontal displacement between the two results
 across a grid of image points. This quantifies how much the choice of
 terrain model contributes to total georeferencing error, independent of
-the IMU/GCP work tracked as Levels 1-3.
+IMU and GCP error.
 
 Reuses the same pose-resolution and ray/terrain intersection code as
 validate_georef.py and georeference_terrain.py rather than reimplementing
-it, so results are directly comparable to the rest of the accuracy plan.
+it, so results are directly comparable to those tools.
 
 Usage:
     python scripts/flood_export.py \
-        --image Meadowbrook-006/20260426-090402-NIR-OFF.jpg \
-        --dsm-a output/pix4d/2026-04-24-13-11-52_dem.tif \
-        --dsm-b USGS_1M_18_x41y477_NY_FEMAR2_Central_2018_D19.tif \
-        --unit-config unit_config_UFO006.json
+        --image photo.jpg \
+        --dsm-a output/pix4d/<scan>_dem.tif \
+        --dsm-b usgs_1m_dem.tif \
+        --unit-config unit_config_<unit>.json
 """
 
 import argparse

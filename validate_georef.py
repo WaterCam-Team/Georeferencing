@@ -1,5 +1,5 @@
 """
-Georeferencing accuracy validation for Meadowbrook-006 data.
+Georeferencing accuracy validation for a fixed-mount node photo.
 
 Compares terrain-aware georeferencing of a UFONet photo against:
 1. DEM elevation consistency (camera height above terrain)
@@ -8,9 +8,9 @@ Compares terrain-aware georeferencing of a UFONet photo against:
 
 Usage:
     python validate_georef.py \
-        --image  /path/to/20260426-090402-NIR-OFF.jpg \
-        --dem    /path/to/USGS_1M_18_x41y477.tif \
-        --pix4d  /path/to/2026-04-26-14-07-06/
+        --image  /path/to/photo-NIR-OFF.jpg \
+        --dem    /path/to/usgs_1m_dem.tif \
+        --pix4d  /path/to/<pix4d_scan_dir>/
 
 Result: prints validation report with footprint, overlap, and error estimates.
 """
@@ -532,7 +532,7 @@ def main():
             "a unit config JSON passed via --unit-config, not on the command line.\n"
             "CLI args override the unit config for one-off testing only.\n\n"
             "Example:\n"
-            "  %(prog)s --image photo.jpg --dem terrain.tif --unit-config unit_config_UFO006.json"
+            "  %(prog)s --image photo.jpg --dem terrain.tif --unit-config unit_config_<unit>.json"
         ),
     )
     p.add_argument("--image", required=True, help="Path to photo")

@@ -2,6 +2,7 @@
 import csv
 import json
 import tempfile
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -21,7 +22,7 @@ def _make_session(tmp_path: Path, geoid_sep: float | None) -> Path:
     geolocations.mkdir()
 
     # Minimal input_cameras.json — one capture, camera pointing straight down
-    cap_lat, cap_lon, cap_alt_ellip = 40.71280, -74.00600, 87.0
+    cap_lat, cap_lon, cap_alt_ellip = 40.71280, -74.00600, 50.0
     input_cameras = {
         "version": "1.0",
         "format": "application/opf-input-cameras+json",
@@ -58,6 +59,10 @@ def _make_session(tmp_path: Path, geoid_sep: float | None) -> Path:
     }
     (opf / "projected_input_cameras.json").write_text(json.dumps(projected))
 
+    # Frame files must exist; their contents come from the cv2/tifffile mocks.
+    (images / "Image_000001.jpg").touch()
+    (images / "DepthMap_000001.tiff").touch()
+
     # rtkGPS.csv with GeoidSeparation
     if geoid_sep is not None:
         with open(geolocations / "rtkGPS.csv", "w", newline="") as f:
@@ -86,7 +91,7 @@ def _make_depth_image(depth_m: float, shape=(192, 256)) -> np.ndarray:
 class TestLocateInPix4dGeoidCorrection:
     """locate_in_pix4d must convert ellipsoidal altitude to orthometric via geoid_sep."""
 
-    GEOID_SEP = -34.452   # typical for Syracuse, NY
+    GEOID_SEP = -34.0     # synthetic; a typical magnitude
 
     def _run_locate(self, session_dir: Path, depth_m: float = 3.0):
         """
@@ -108,16 +113,16 @@ class TestLocateInPix4dGeoidCorrection:
 
         fake_color = np.zeros((192, 256, 3), dtype=np.uint8)
 
+        # locate_in_pix4d imports tifffile inside the function, so the mock goes
+        # in sys.modules rather than on the aruco_gcp module.
+        mock_tifffile = MagicMock()
+        mock_tifffile.imread.return_value = fake_depth
+
         with (
             patch("aruco_gcp._make_detector", return_value=fake_detector),
             patch("aruco_gcp.cv2.imread", return_value=fake_color),
-            patch("aruco_gcp.tifffile") as mock_tifffile,
+            patch.dict(sys.modules, {"tifffile": mock_tifffile}),
         ):
-            mock_tifffile.imread.return_value = fake_depth
-            # Inject tifffile into the module namespace for the import inside the fn
-            import sys
-            sys.modules.setdefault("tifffile", mock_tifffile)
-
             result = aruco_gcp.locate_in_pix4d(
                 str(session_dir),
                 dict_name="DICT_4X4_50",
@@ -133,11 +138,11 @@ class TestLocateInPix4dGeoidCorrection:
         result = self._run_locate(session, depth_m=3.0)
         assert 7 in result, "Marker 7 should be detected"
 
-        # Camera ellipsoidal altitude = 87.0 m, depth = 3.0 m straight down
-        # Marker ellipsoidal altitude ≈ 87.0 − 3.0 = 84.0 m
-        # After geoid correction: 84.0 − (−34.452) = 118.452 m orthometric
+        # Camera ellipsoidal altitude = 50.0 m, depth = 3.0 m straight down
+        # Marker ellipsoidal altitude ≈ 50.0 − 3.0 = 47.0 m
+        # After geoid correction: 47.0 − (−34.0) = 81.0 m orthometric
         elev = result[7]["elev_m"]
-        expected_ortho = 87.0 - 3.0 - self.GEOID_SEP   # 118.452
+        expected_ortho = 50.0 - 3.0 - self.GEOID_SEP   # 81.0
         assert abs(elev - expected_ortho) < 0.1, (
             f"Expected orthometric ~{expected_ortho:.1f} m, got {elev:.3f} m"
         )
@@ -149,7 +154,7 @@ class TestLocateInPix4dGeoidCorrection:
         assert 7 in result
 
         elev = result[7]["elev_m"]
-        expected_ellip = 87.0 - 3.0   # 84.0 m ellipsoidal
+        expected_ellip = 50.0 - 3.0   # 47.0 m ellipsoidal
         assert abs(elev - expected_ellip) < 0.1, (
             f"Without geoid sep, expected ellipsoidal ~{expected_ellip:.1f} m, got {elev:.3f} m"
         )
@@ -159,6 +164,6 @@ class TestLocateInPix4dGeoidCorrection:
         session = _make_session(tmp_path, geoid_sep=self.GEOID_SEP)
         result = self._run_locate(session, depth_m=3.0)
         elev = result[7]["elev_m"]
-        # If correction were applied twice the value would be ~152.9 m — clearly wrong
-        assert elev < 130.0, f"Geoid applied twice? Got {elev:.1f} m"
-        assert elev > 110.0, f"Correction not applied? Got {elev:.1f} m"
+        # Once: 47 + 34 = 81 m.  Twice would be ~115 m; never would be 47 m.
+        assert elev < 98.0, f"Geoid applied twice? Got {elev:.1f} m"
+        assert elev > 64.0, f"Correction not applied? Got {elev:.1f} m"

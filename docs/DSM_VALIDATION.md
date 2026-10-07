@@ -7,8 +7,7 @@ Covers two distinct quality checks:
 
 Related docs: [PIX4DCATCH_DATA_FORMAT.md](PIX4DCATCH_DATA_FORMAT.md),
 [ACCURACY_AND_EXTERNAL_RESOURCES.md](ACCURACY_AND_EXTERNAL_RESOURCES.md),
-[GEOREFERENCING_PROCESS_DETAILED.md](GEOREFERENCING_PROCESS_DETAILED.md),
-the backyard test notes (kept locally) (RTK-validated GCP refinement + a critical EXIF pitch-sign finding)
+[GEOREFERENCING_PROCESS_DETAILED.md](GEOREFERENCING_PROCESS_DETAILED.md)
 
 ---
 
@@ -19,16 +18,16 @@ the backyard test notes (kept locally) (RTK-validated GCP refinement + a critica
 After running `scripts/pix4d_to_las_dem.py`, validate the output with:
 
 ```bash
-.venv/bin/python scripts/validate_dsm.py output/pix4d/2026-04-24-13-11-52_dem.tif
+.venv/bin/python scripts/validate_dsm.py output/pix4d/<scan>_dem.tif
 ```
 
 The script infers the camera poses CSV from the DSM filename.  Supply it
 explicitly with `--poses` if needed.
 
-**Example output:**
+**Example output** (illustrative):
 
 ```
-=== DSM Quality Report: 2026-04-24-13-11-52_dem.tif ===
+=== DSM Quality Report: <scan>_dem.tif ===
 
 Geometry
   PASS  CRS = EPSG:6347  —  got EPSG:6347
@@ -84,7 +83,7 @@ Unit tests run without any data on disk.  Integration tests
 absent.  Generate the DSM first if needed:
 
 ```bash
-.venv/bin/python scripts/pix4d_to_las_dem.py 2026-04-24-13-11-52
+.venv/bin/python scripts/pix4d_to_las_dem.py <scan>
 ```
 
 ### 1.4 max-Z vs linear-interpolated DSM
@@ -106,14 +105,14 @@ spike cell while `linear` returns ≤109.5 m.
 
 ### 1.5 Visual inspection in QGIS
 
-1. Load `<scan>_dem.tif` (DSM) and `BarryPark-FEMA-1M-DEM-18TVN080640.tif` (reference).
+1. Load `<scan>_dem.tif` (DSM) and a national 1 m DEM, e.g. USGS/FEMA (reference).
 2. Apply a hillshade render to both (Layer Properties → Symbology → Hillshade).
 3. Check that linear features (kerbs, wall edges, drainage channels) align between
    the two layers.  Systematic offset in X or Y indicates a CRS or shift error.
-4. Spot-check z values with the Identify tool at recognisable features.  At this site
-   the DSM uses ellipsoidal height; the FEMA DEM uses NAVD88 orthometric.  The
-   expected separation is ≈34 m (geoid height at Syracuse NY); confirm with
-   `vertical_datum.py`.
+4. Spot-check z values with the Identify tool at recognisable features.  The DSM
+   uses ellipsoidal height; a USGS/FEMA DEM uses NAVD88 orthometric.  The two
+   differ by the local geoid height (≈34 m across much of the north-eastern US);
+   confirm with `vertical_datum.py`.
 
 ---
 
@@ -209,54 +208,29 @@ Random scatter → orientation noise + DSM resolution limit.
 
 ---
 
-## 3. Level 4 — DSM Source Comparison
+## 3. DSM Source Comparison
 
 Quantifies how much terrain-model choice (Pix4DCatch photogrammetric DSM vs.
 a national DEM) contributes to georeferenced position error, independent of
-IMU/GCP accuracy. Run via `scripts/flood_export.py` (added 2026-07-15):
+IMU/GCP accuracy. Run via `scripts/flood_export.py`:
 
 ```bash
 .venv/bin/python scripts/flood_export.py \
-  --image Meadowbrook-006/20260426-090402-NIR-OFF.jpg \
-  --dsm-a output/pix4d/2026-04-24-13-11-52_dem.tif \
-  --dsm-b USGS_1M_18_x41y477_NY_FEMAR2_Central_2018_D19.tif \
-  --unit-config unit_config_UFO006.json
+  --image photo.jpg \
+  --dsm-a output/pix4d/<scan>_dem.tif \
+  --dsm-b usgs_1m_dem.tif \
+  --unit-config unit_config_<unit>.json
 ```
 
 It samples a regular pixel grid over the image, ray-casts each point against
 both terrain sources, and reports the horizontal displacement between the
 two results, bucketed by slant range.
 
-### 3.1 Result (2026-07-15, Meadowbrook-006/UFO-006)
-
-This run was blocked until the EXIF pitch-sign bug was fixed (see
-the backyard test notes, kept locally) — before the fix, every ray missed the
-ground on both terrain sources (0/352 hits). After the fix:
-
-| | value |
-|---|---|
-| Grid points sampled | 352 (22×16, ~120px spacing) |
-| Points hitting both DSMs | 352 / 352 (100%) |
-| Mean displacement | 0.241 m |
-| Median displacement | 0.000 m |
-| 90th percentile | 0.478 m |
-| Max | 0.972 m |
-| Slant range of all points | < 10 m (camera mount is only 0.84 m AGL, tilted 33.75° down) |
-
-**Interpretation:** at close range (<10 m, all this photo's footprint
-covers), DSM choice contributes on the order of a few tens of cm on
-average, up to ~1 m at the tail — meaningful relative to the 5cm design
-target, but the median of 0.000 m suggests much of that is the USGS DEM's
-1m grid resolution snapping nearby points to the same cell rather than a
-systematic bias.
-
-**Limitation:** this photo's footprint is entirely close-range (<10 m) —
-the low, steeply-downward-tilted mount doesn't reach the 10–20 m /
-road-crown-and-curb range the accuracy plan's Level 4 was specifically
-designed to characterize (§Level 4 in `ACCURACY_IMPROVEMENT_PLAN.md`:
-"DSM choice matters most at road-crown and curb features"). A photo with a
-farther, shallower view (or a different capture from this site) would be
-needed to test that scenario specifically.
+Interpreting results: a median near 0 m with a long tail usually means the
+national DEM's 1 m grid is snapping nearby points to the same cell rather than
+a systematic bias. Close-range footprints (<10 m) say little about the 10–20 m
+range, where curb and road-crown relief makes the DSM choice matter most, so
+test with a farther, shallower view as well.
 
 ---
 

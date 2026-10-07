@@ -8,16 +8,16 @@ merges it with per-image EXIF values and CLI overrides.
 
 Precedence (highest to lowest):
   1. Explicit CLI args (e.g. --heading, --height-above-ground)
-  2. Unit config JSON  (e.g. unit_config_UFO006.json)
+  2. Unit config JSON  (e.g. unit_config.example.json)
   3. Per-image EXIF    (GPS lat/lon, altitude, IMU yaw/pitch/roll)
   4. Script defaults
 
 Unit config JSON schema
 -----------------------
 {
-  "unit_id":            "UFO-006",        // human identifier
+  "unit_id":            "UFO-000",        // human identifier
   "calibration":        "./calibration.json",
-  "mount_height_m":     0.8382,           // camera height above ground (m); null = derive from EXIF altitude
+  "mount_height_m":     1.5,              // camera height above ground (m); null = derive from EXIF altitude
   "camera_lat":         null,             // surveyed camera latitude (WGS84 deg); null = use EXIF GPS
   "camera_lon":         null,             // surveyed camera longitude (WGS84 deg); null = use EXIF GPS
   "camera_alt_ellipsoid_m": null,         // surveyed camera altitude above the WGS84 ellipsoid (m)
@@ -29,7 +29,7 @@ Unit config JSON schema
 
   // IMU / BNO055 fields — applied to EXIF Yaw in resolve_heading() only
   "imu_mount_offset_deg":         180.0,  // physical sensor rotation relative to camera body
-  "imu_magnetic_declination_deg": -12.5,  // site declination, positive = East (Syracuse NY ≈ -12.5)
+  "imu_magnetic_declination_deg": 0.0,    // site declination, positive = East; look it up per site (NOAA)
   "imu_heading_correction_deg":   0.0,    // residual error from post-mount validation; update after Stage 2
   "imu_calibration_file":         "./bno055_calibration.json"  // offset file path (informational)
 }

@@ -1,0 +1,17 @@
+{
+  "unit_id": "UFO-000",
+  "calibration": "./calibration.json",
+  "mount_height_m": 1.5,
+  "camera_lat": null,
+  "camera_lon": null,
+  "camera_alt_ellipsoid_m": null,
+  "heading_deg": null,
+  "pitch_deg": null,
+  "roll_deg": null,
+  "camera_elev_datum": "wgs84_ellipsoid",
+  "imu_mount_offset_deg": 0.0,
+  "imu_magnetic_declination_deg": 0.0,
+  "imu_heading_correction_deg": 0.0,
+  "imu_calibration_file": "./bno055_calibration.json",
+  "notes": "Example only. Copy to unit_config_<unit>.json (gitignored) and fill in per node."
+}

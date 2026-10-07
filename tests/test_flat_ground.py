@@ -45,7 +45,7 @@ def test_off_nadir_ground_point_round_trip():
 
     # Camera 10 m high, looking straight down
     R = build_rotation_matrix(0.0, -90.0, 0.0)
-    cam_lat, cam_lon = 43.0, -76.0
+    cam_lat, cam_lon = 40.0, -74.0
     height = 10.0
 
     # Ground point 5 m east, 3 m north of camera in ENU

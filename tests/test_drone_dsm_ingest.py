@@ -31,9 +31,9 @@ def _write_synthetic_raster(
     crs = CRS.from_epsg(epsg) if epsg is not None else None
 
     if epsg == 6347:
-        left, bottom, right, top = 380000.0, 4762000.0, 380020.0, 4762020.0
+        left, bottom, right, top = 584000.0, 4507000.0, 584020.0, 4507020.0
     else:
-        left, bottom, right, top = -76.14, 43.04, -76.13, 43.05
+        left, bottom, right, top = -74.14, 40.04, -74.13, 40.05
 
     transform = from_bounds(left, bottom, right, top, width, height)
     data = np.full((height, width), z_base, dtype=np.float32)
