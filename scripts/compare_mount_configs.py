@@ -2,11 +2,11 @@
 Compare auto-corrected EXIF pose vs. GCP-refined "true" pose, across one or
 more IMU mount configurations, using RTK-surveyed ArUco marker ground truth.
 
-Motivation: for UFO-006 (imu_mount_offset_deg=180), unit_config.resolve_pitch_roll()
-resolves an upward-pointing pose for a real flood photo (confirmed independently
-via validate_georef.py finding zero terrain intersections). This script gives a
+Motivation: for a node with imu_mount_offset_deg=180, unit_config.resolve_pitch_roll()
+can resolve an upward-pointing pose for a real flood photo (seen as
+validate_georef.py finding zero terrain intersections). This script gives a
 controlled way to check whether the 180-degree negation formula actually recovers
-a pose close to ground truth, using a backyard test rig with RTK-surveyed markers
+a pose close to ground truth, using a test rig with RTK-surveyed markers
 instead of relying on indirect evidence from one field photo.
 
 For each session (e.g. one mount orientation), it:
@@ -20,16 +20,16 @@ For each session (e.g. one mount orientation), it:
      fit (a sanity check that the RTK data + refinement itself are trustworthy).
 
 Usage:
-    python scripts/compare_mount_configs.py --manifest backyard_test.json
+    python scripts/compare_mount_configs.py --manifest rig_test.json
 
 Manifest schema (JSON):
 {
   "unit_config": "unit_config_TEST.json",     // shared base: mount_height_m, calibration, etc.
-  "rtk_gcps_csv": "backyard_rtk_gcps.csv",    // marker_id,lat,lon,elev_m[,std_m]
+  "rtk_gcps_csv": "rig_rtk_gcps.csv"   ,    // marker_id,lat,lon,elev_m[,std_m]
   "aruco_dict": "DICT_4X4_50",
   "sessions": [
-    {"name": "nominal_0deg",   "image": "backyard/nominal/photo.jpg",   "imu_mount_offset_deg": 0},
-    {"name": "rotated_180deg", "image": "backyard/rotated/photo.jpg",   "imu_mount_offset_deg": 180}
+    {"name": "nominal_0deg",   "image": "rig/nominal/photo.jpg",   "imu_mount_offset_deg": 0},
+    {"name": "rotated_180deg", "image": "rig/rotated/photo.jpg",   "imu_mount_offset_deg": 180}
   ]
 }
 

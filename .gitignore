@@ -257,7 +257,6 @@ Calibration Photos*/
 
 # --- geospatial data files ---
 *.geojson
-Meadowbrook-*.json
 UFO2.json
 ufo2.json
 *_psscene_*/
@@ -275,8 +274,6 @@ docs/paper/main.pdf
 # on a node carry GPS and IMU in EXIF, and site imagery is location data in its
 # own right. Nothing here is tracked today; this keeps it that way.
 Calibration Data/
-Backyard */
-Meadowbrook-*/
 [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]/
 *.mp4
 *.dem
@@ -296,8 +293,12 @@ INDEPENDENT_STUDY_REPORT.md
 
 # Private: field-test write-ups, the paper and its figure scripts, local
 # validation reports and tool config. Kept locally, never pushed.
-docs/BACKYARD_TEST_*.md
 docs/paper/
 make_fig_*.py
 georef-validation-report*.html
 .mcp.json
+
+# Per-site working notes and per-node configs (mount, heading, site position).
+# Kept locally; unit_config.example.json shows the schema.
+docs/ACCURACY_IMPROVEMENT_PLAN.md
+unit_config_*.json

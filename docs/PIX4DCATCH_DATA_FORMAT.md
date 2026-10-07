@@ -3,11 +3,8 @@
 ## Overview
 
 Field scans collected with a **Pix4DCatch** app on an **iPhone 13 Pro** with a **viDoc RTK** rover.
-Data lives under `/var/home/manu/UFONet iPhone Data/`, one subdirectory per scan session named by
-timestamp (e.g. `2026-04-09-14-10-48`).
-
-There are 17 scan sessions (2024-07-25 through 2026-04-09). Each is also available as a `.zip`
-alongside its extracted directory.
+Each scan session is a directory named by timestamp (e.g. `2026-04-09-14-10-48`), kept
+outside the repo; Pix4DCatch also exports each session as a `.zip`.
 
 ---
 
@@ -70,7 +67,7 @@ alongside its extracted directory.
 {
   "crs": "PROJCRS[\"NAD83(2011) / UTM zone 18N\" ... EPSG:6347]",
   "base_to_canonical": {
-    "shift": [-404503, -4768704, -80],
+    "shift": [-584000, -4507500, -10],
     "scale": [1, 1, 1],
     "swap_xy": false
   }
@@ -80,15 +77,15 @@ alongside its extracted directory.
 - **Canonical** = absolute NAD83(2011) / UTM Zone 18N (EPSG:6347), metres.
 - **Base (local)** = scene-centred frame used inside GLTF and `projected_input_cameras.json`.
 - **Transform**: `utm_xyz = local_xyz - shift`
-  - Equivalently: add `[+404503, +4768704, +80]` to every local coordinate.
-- The local origin sits at approximately UTM E 404503, N 4768704, Z 80 m
+  - Equivalently: add `[+584000, +4507500, +10]` to every local coordinate.
+- The local origin sits at approximately UTM E 584000, N 4507500, Z 10 m
   (lat ≈ 40.7128°, lon ≈ -74.0060°; placeholder, not a deployment site).
 
 ### Vertical datum
 
 `GPSAltitude` in `rtkGPS.csv` is **ellipsoidal height** (NAD83(2011) ellipsoid).
 `ReferenceAltitude` column = orthometric height (NAVD88 via EGM96 geoid separation stored in
-`GeoidSeparation` column, ~-34.46 m for this area).
+`GeoidSeparation` column; site-dependent, e.g. ≈ -34 m).
 
 The point cloud Z axis follows the ellipsoidal height convention unless Pix4DCatch applies the
 geoid correction internally (verify with `vertical_datum.py` if mixing with DEM sources).
@@ -132,7 +129,7 @@ xyz_local = raw[:, :3]   # local coords
 rgb_norm  = raw[:, 3:]   # 0.0–1.0
 ```
 
-Apply transform: `xyz_utm = xyz_local + np.array([404503, 4768704, 80])`.
+Apply transform: `xyz_utm = xyz_local + np.array([584000, 4507500, 10])`.
 (Read shift from `scene_reference_frame.json`; do not hardcode for other sites.)
 
 ### Typical point count (Apr 2026 scans)
@@ -202,12 +199,12 @@ for terrain intersection in `georeference_terrain.py`.
 
 ```bash
 # True DSM preserving sensor housing height
-.venv/bin/python scripts/pix4d_to_las_dem.py 2026-04-24-13-11-52 --dsm-method max
+.venv/bin/python scripts/pix4d_to_las_dem.py <scan> --dsm-method max
 ```
 
 Batch all scans:
 ```bash
-for d in "/var/home/manu/UFONet iPhone Data/"/*/; do
+for d in "$PIX4D_DATA_DIR"/*/; do
     .venv/bin/python scripts/pix4d_to_las_dem.py "$d" --out-dir output/pix4d
 done
 ```
@@ -218,7 +215,7 @@ Validates a generated DSM for CRS, resolution, elevation range, and camera-pose
 consistency.  Run immediately after `pix4d_to_las_dem.py`:
 
 ```bash
-.venv/bin/python scripts/validate_dsm.py output/pix4d/2026-04-24-13-11-52_dem.tif
+.venv/bin/python scripts/validate_dsm.py output/pix4d/<scan>_dem.tif
 ```
 
 Exit code 0 = all checks passed.  See [DSM_VALIDATION.md](DSM_VALIDATION.md) for

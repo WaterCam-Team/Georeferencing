@@ -25,7 +25,7 @@ Typical usage
     python scripts/flood_extent_export.py field.jpg \\
         --mask flood_mask.png \\
         --dem drone_dsm/dsm_ingest.tif \\
-        --unit-config unit_config_UFO006.json \\
+        --unit-config unit_config_<unit>.json \\
         --calib calibration.json \\
         --out-dir ./flood_extent
 
@@ -40,7 +40,7 @@ Typical usage
 
     # Convex hull instead of raw contour (cleaner polygon for hydraulic models):
     python scripts/flood_extent_export.py field.jpg --mask mask.png --dem dsm.tif \\
-        --unit-config unit_config_UFO006.json --hull
+        --unit-config unit_config_<unit>.json --hull
 
 Requires: rasterio, numpy, opencv-python, scipy, pyproj, Pillow
 """
