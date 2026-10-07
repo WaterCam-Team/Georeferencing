@@ -26,7 +26,7 @@ def _read_geoid_separation(scan_dir: Path) -> float | None:
 
     N = GPSAltitude - ReferenceAltitude (ellipsoidal minus orthometric).
     To convert point cloud Z from ellipsoidal to orthometric: Z_ortho = Z_ellip - N.
-    For Syracuse NY, N ≈ -34.43 m, so orthometric = ellipsoidal + 34.43 m.
+    For example, with N ≈ -34 m, orthometric = ellipsoidal + 34 m.
     """
     rtk_path = scan_dir / "geolocations" / "rtkGPS.csv"
     if not rtk_path.exists():

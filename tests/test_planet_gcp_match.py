@@ -29,7 +29,7 @@ def test_select_by_grid_spreads_points():
 
 def test_write_gcp_csv_format(tmp_path: Path):
     out = tmp_path / "gcp.csv"
-    gcps = [("planet_1", 10.0, 20.0, 43.0, -76.0), ("planet_2", 11.0, 21.0, 44.0, -75.0)]
+    gcps = [("planet_1", 10.0, 20.0, 40.0, -74.0), ("planet_2", 11.0, 21.0, 41.0, -73.0)]
     _write_gcp_csv(out, gcps)
 
     with open(out, newline="", encoding="utf-8") as f:
@@ -40,6 +40,6 @@ def test_write_gcp_csv_format(tmp_path: Path):
     assert len(rows) == 2
     assert rows[0]["label"] == "planet_1"
     assert float(rows[0]["pixel_u"]) == 10.0
-    assert float(rows[0]["lat"]) == 43.0
+    assert float(rows[0]["lat"]) == 40.0
     assert rows[0]["elev_m"] == ""
 

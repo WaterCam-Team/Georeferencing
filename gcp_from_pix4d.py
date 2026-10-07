@@ -6,10 +6,10 @@ back-projects through the depth map and camera pose to produce an RTK-quality
 (lat, lon, elev_m) for the clicked surface point.  Prints to terminal and
 accumulates in a GCP CSV suitable for use with gcp.py / georeference_terrain.py.
 
-Typical use — validate the UFO-006 georeferencing pipeline without ArUco markers:
+Typical use — validate a node's georeferencing pipeline without ArUco markers:
   1. Open the closest Pix4DCatch frame to the camera footprint.
   2. Click identifiable features (road markings, curb edge, lamp post base).
-  3. Find the same features in the UFO-006 photo and click them in
+  3. Find the same features in the node's photo and click them in
      georeference_terrain.py.
   4. Compare predicted vs RTK coordinates → residual in metres.
 

@@ -11,7 +11,7 @@ USAGE:
                             [--downscale F] [--no-display]
 
 EXAMPLE:
-    python reconstruct3d.py Pixel3a/Pixel3a-BarryPark --calib calibration.json
+    python reconstruct3d.py photos/site_scan --calib calibration.json
 
 DEPENDENCIES:
     uv pip install opencv-python matplotlib scipy

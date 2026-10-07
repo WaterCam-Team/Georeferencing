@@ -15,14 +15,17 @@ Run unit tests only (no external data required):
     PYTHONPATH=. .venv/bin/pytest tests/test_dsm_validation.py::TestGridMaxZ
     PYTHONPATH=. .venv/bin/pytest tests/test_dsm_validation.py::TestMaxVsLinearSynthetic
 
-Run all (integration tests auto-skip if DSM is missing):
-    PYTHONPATH=. .venv/bin/pytest tests/test_dsm_validation.py -v
+Run all (integration tests auto-skip unless GEOREF_TEST_SCAN names a scan whose
+DSM exists; scan data and its expected heights stay local, outside the repo):
+    GEOREF_TEST_SCAN=<scan> GEOREF_TEST_Z_RANGE=<min>,<max> \
+        PYTHONPATH=. .venv/bin/pytest tests/test_dsm_validation.py -v
 
 Generate the DSM first if needed:
-    PYTHONPATH=. .venv/bin/python scripts/pix4d_to_las_dem.py 2026-04-24-13-11-52
+    PYTHONPATH=. .venv/bin/python scripts/pix4d_to_las_dem.py <scan>
 """
 
 import csv
+import os
 import sys
 from pathlib import Path
 
@@ -33,16 +36,19 @@ REPO = Path(__file__).parent.parent
 SCRIPTS = REPO / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-SCAN_NAME = "2026-04-24-13-11-52"
+SCAN_NAME = os.environ.get("GEOREF_TEST_SCAN", "")
 SCAN_DIR = REPO / SCAN_NAME
 DSM_LINEAR = REPO / "output/pix4d" / f"{SCAN_NAME}_dem.tif"
 DSM_MAX = REPO / "output/pix4d" / f"{SCAN_NAME}_dem_max.tif"
 POSES_CSV = REPO / "output/pix4d" / f"{SCAN_NAME}_camera_poses.csv"
 RTK_CSV = SCAN_DIR / "geolocations" / "rtkGPS.csv"
 
+# Expected orthometric DSM height range for the scan, "min,max" in metres.
+Z_RANGE = os.environ.get("GEOREF_TEST_Z_RANGE", "")
+
 integration = pytest.mark.skipif(
-    not DSM_LINEAR.exists(),
-    reason=f"Integration data missing: run scripts/pix4d_to_las_dem.py {SCAN_NAME} first",
+    not SCAN_NAME or not DSM_LINEAR.exists(),
+    reason="Integration data missing: set GEOREF_TEST_SCAN and run scripts/pix4d_to_las_dem.py <scan> first",
 )
 
 
@@ -287,9 +293,12 @@ class TestDSMProperties:
 
     def test_dsm_elevation_range_plausible(self):
         """
-        Orthometric (NAVD88) heights at this site are ~143-148 m.
-        If the range is wildly outside this, the UTM shift or datum is wrong.
+        Orthometric (NAVD88) heights must fall inside GEOREF_TEST_Z_RANGE.
+        If the range is wildly outside it, the UTM shift or datum is wrong.
         """
+        if not Z_RANGE:
+            pytest.skip("GEOREF_TEST_Z_RANGE not set")
+        z_lo, z_hi = (float(v) for v in Z_RANGE.split(","))
         rasterio = pytest.importorskip("rasterio")
         with rasterio.open(DSM_LINEAR) as src:
             data = src.read(1)
@@ -297,10 +306,10 @@ class TestDSMProperties:
         valid = data[data != nd]
         z_min, z_max, z_mean = valid.min(), valid.max(), valid.mean()
         print(f"\n  DSM z: {z_min:.2f}–{z_max:.2f} m  mean={z_mean:.2f} m")
-        assert 130.0 < z_min, (
+        assert z_lo < z_min, (
             f"DSM min elevation {z_min:.2f} m unexpectedly low — check UTM shift or geoid correction"
         )
-        assert z_max < 160.0, (
+        assert z_max < z_hi, (
             f"DSM max elevation {z_max:.2f} m unexpectedly high — check UTM shift or geoid correction"
         )
 
@@ -414,7 +423,7 @@ class TestCameraPosesAboveDSM:
 
     Camera poses carry ellipsoidal altitudes; the DSM uses NAVD88 orthometric.
     Geoid separation N is read from rtkGPS.csv and applied:
-        alt_ortho = alt_ellipsoid - N   (N ≈ -34.43 m for Syracuse NY)
+        alt_ortho = alt_ellipsoid - N   (N is read per scan)
     """
 
     @pytest.fixture(scope="class")
