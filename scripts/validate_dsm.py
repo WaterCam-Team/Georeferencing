@@ -5,9 +5,8 @@ Checks performed
 ----------------
 1. CRS        — must be EPSG:6347 (NAD83(2011) / UTM zone 18N)
 2. Resolution — must match --expected-res (default 0.05 m)
-3. Elevation  — z range must fall within plausible ellipsoidal bounds for the
-                Syracuse NY area (100–125 m).  Adjust --z-min / --z-max for
-                other sites.
+3. Elevation  — z range must fall within plausible ellipsoidal bounds (default 100–125 m).  Set --z-min / --z-max for
+                each site.
 4. Coverage   — fraction of bounding-box cells that contain valid data
 5. Camera     — every camera pose from <scan>_camera_poses.csv must lie above
                 the DSM surface; median height above ground must be 0.5–10 m

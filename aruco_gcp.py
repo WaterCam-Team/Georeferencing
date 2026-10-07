@@ -213,8 +213,8 @@ def locate_in_pix4d(
     # ── Geoid separation for ellipsoidal → orthometric conversion ────────────
     # OPF geolocation altitudes are WGS84 ellipsoidal; elev_m output should be
     # NAVD88/EGM96 orthometric so it matches DEM-derived elevations in the rest
-    # of the pipeline.  At Syracuse NY, N ≈ −34.5 m, so omitting this causes a
-    # ~35 m error in all reported marker elevations.
+    # of the pipeline.  N is site-dependent and often tens of metres (≈ −34 m in
+    # the north-eastern US), so omitting this shifts every marker elevation by N.
     geoid_sep: Optional[float] = None
     rtk_path = session_dir / "geolocations" / "rtkGPS.csv"
     if rtk_path.exists():

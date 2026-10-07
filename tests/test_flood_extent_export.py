@@ -54,7 +54,7 @@ def test_project_contour_empty_returns_empty():
     R = _flat_R()
     result = project_contour(
         np.empty((0, 2), dtype=np.float32), K, R,
-        43.0, -76.0, 110.0, _const_elevation(109.0),
+        40.0, -74.0, 110.0, _const_elevation(109.0),
     )
     assert result == []
 
@@ -66,7 +66,7 @@ def test_project_contour_terrain_miss_dropped():
     # get_elevation always None → every ray misses
     result = project_contour(
         np.array([[320, 240]], dtype=np.float32), K, R,
-        43.0, -76.0, 110.0, lambda lon, lat: None,
+        40.0, -74.0, 110.0, lambda lon, lat: None,
     )
     assert result == []
 
@@ -78,7 +78,7 @@ def test_project_contour_hit_returns_dict_keys():
     # Camera 10 m above flat terrain at 100 m elevation
     result = project_contour(
         np.array([[320, 400]], dtype=np.float32), K, R,
-        43.0, -76.0, 110.0, _const_elevation(100.0),
+        40.0, -74.0, 110.0, _const_elevation(100.0),
         step_m=0.5, max_range_m=200.0,
     )
     if result:   # ray may or may not intersect depending on geometry
@@ -89,7 +89,7 @@ def test_project_contour_hit_returns_dict_keys():
 # gps_points_to_polygon
 # ---------------------------------------------------------------------------
 
-def _gps(n=6, base_lat=43.0, base_lon=-76.0, spread=0.001):
+def _gps(n=6, base_lat=40.0, base_lon=-74.0, spread=0.001):
     """Generate n GPS-like points in a rough circle."""
     pts = []
     for i in range(n):
@@ -141,7 +141,7 @@ def test_gps_points_to_polygon_hull_is_closed():
 # ---------------------------------------------------------------------------
 
 def test_build_geojson_structure():
-    ring = [(-76.0, 43.0), (-76.001, 43.001), (-75.999, 43.001), (-76.0, 43.0)]
+    ring = [(-74.0, 40.0), (-74.001, 40.001), (-73.999, 40.001), (-74.0, 40.0)]
     gj = build_geojson(ring, {"test": True})
     assert gj["type"] == "FeatureCollection"
     assert len(gj["features"]) == 1
@@ -157,7 +157,7 @@ def test_build_geojson_structure():
 # ---------------------------------------------------------------------------
 
 def test_export_geojson_writes_valid_file(tmp_path):
-    ring = [(-76.0, 43.0), (-76.001, 43.001), (-75.999, 43.001), (-76.0, 43.0)]
+    ring = [(-74.0, 40.0), (-74.001, 40.001), (-73.999, 40.001), (-74.0, 40.0)]
     gj = build_geojson(ring, {})
     out = tmp_path / "test.geojson"
     export_geojson(gj, out)
@@ -172,8 +172,8 @@ def test_export_geojson_writes_valid_file(tmp_path):
 
 def test_export_geotiff_creates_valid_raster(tmp_path):
     ring = [
-        (-76.005, 43.060), (-76.000, 43.065), (-75.995, 43.060),
-        (-76.000, 43.055), (-76.005, 43.060),
+        (-74.005, 40.060), (-74.000, 40.065), (-73.995, 40.060),
+        (-74.000, 40.055), (-74.005, 40.060),
     ]
     out = tmp_path / "flood.tif"
     export_geotiff(ring, out, resolution_deg=0.001)
@@ -193,9 +193,9 @@ def test_export_geotiff_flood_inside_polygon(tmp_path):
     """Pixels inside the polygon must be 1."""
     # Simple square
     ring = [
-        (-76.010, 43.055), (-76.010, 43.065),
-        (-75.990, 43.065), (-75.990, 43.055),
-        (-76.010, 43.055),
+        (-74.010, 40.055), (-74.010, 40.065),
+        (-73.990, 40.065), (-73.990, 40.055),
+        (-74.010, 40.055),
     ]
     out = tmp_path / "flood_square.tif"
     export_geotiff(ring, out, resolution_deg=0.001)
@@ -246,7 +246,7 @@ def test_main_end_to_end_with_surveyed_position(tmp_path, monkeypatch):
     mask_path = tmp_path / "mask.png"
     cv2.imwrite(str(mask_path), mask)
 
-    lat0, lon0 = 43.0, -76.0                                      # synthetic, not a real site
+    lat0, lon0 = 40.0, -74.0                                      # synthetic, not a real site
     dem = tmp_path / "dem.tif"
     with rasterio.open(dem, "w", driver="GTiff", width=200, height=200, count=1,
                        dtype="float32", crs=CRS.from_epsg(4326),
