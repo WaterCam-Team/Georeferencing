@@ -146,7 +146,8 @@ def load_las_terrain(las_path: str,
 
     resolution_m: grid cell size in meters (in the point cloud's XY CRS).
     las_crs_epsg: EPSG code for the point cloud (e.g. 32618 for UTM 18N).
-                  If None, we try to read from the file (laspy 2.x may expose CRS).
+                  If None, the CRS is read from the file; a ValueError is raised if the
+                  file has none (the CRS is never assumed).
     """
     try:
         import laspy
@@ -198,11 +199,10 @@ def load_las_terrain(las_path: str,
         from pyproj import CRS
         pc_crs = CRS.from_epsg(las_crs_epsg)
     if pc_crs is None:
-        print(
-            "[WARN] LAS CRS unavailable; defaulting to EPSG:4326. "
-            "If your LAS is projected (e.g., UTM), pass --las-crs."
+        raise ValueError(
+            f"LAS file {las_path} has no CRS and none was given. "
+            "Pass --las-crs EPSG (or las_crs_epsg=...) to state it explicitly."
         )
-        pc_crs = "EPSG:4326"
     elif hasattr(pc_crs, 'to_epsg'):
         epsg = pc_crs.to_epsg()
         if epsg is not None:

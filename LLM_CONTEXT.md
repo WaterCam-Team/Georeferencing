@@ -63,7 +63,7 @@ Shared math for flat ground: `geo_core.py` (pixel ray → ENU → `pyproj` local
 | `georeference_tool.py` | Optional **flat-ground** interactive tool (plane model); also used for GCP pose refine when feeding orientation into terrain. |
 | `georeference.py` | Standalone example: EXIF GPS + EXIF/XMP IMU → ground plane. |
 | `georeference3d.py` | Extended 3D-oriented workflow (see file for scope). |
-| `georeference_old.py` | Legacy; prefer `geo_core` / current tools unless migrating. |
+| `archive/georeference_old.py` | Legacy, archived (see `archive/README.md`); use `geo_core` / current tools. |
 | `georeference_sharp.py` | SHARP / 3D Gaussian–related pipeline (optional heavy deps). |
 | `flood_map.py` | Segmentation / mapping helpers (optional ML). |
 | `reconstruct3d.py` | 3D reconstruction utilities (see file). |
