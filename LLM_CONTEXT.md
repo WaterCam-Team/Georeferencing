@@ -6,7 +6,7 @@ This file summarizes the **Python georeferencing toolkit** in this repository so
 
 **Camera calibration** and **pixel → geographic coordinates** for fixed or mobile imagery (e.g. flood/field monitoring). Primary mode: **terrain** (DEM GeoTIFF, LAS/LAZ ray casting). Optional: flat ground (plane intersection) for rare flat-site or legacy workflows.
 
-- Orientation from **IMU logs (CSV)** or **EXIF UserComment** (and optional XMP in `georeference.py`).
+- Orientation from **IMU logs (CSV)** or **EXIF UserComment**.
 - **Ground control points (GCPs)** to refine pose and optional thin-plate spline (TPS) warping in pixel space.
 - When onboard **GPS/IMU is coarse**, combine **surveyed positions**, **ortho GCPs** (Planet/Pix4D), and **quality terrain** — see `docs/ACCURACY_AND_EXTERNAL_RESOURCES.md`.
 
@@ -23,7 +23,7 @@ Human-facing workflow: `docs/GEOREFERENCING_PROCEDURE.md` (researcher checklist)
 | Tier | Packages |
 |------|----------|
 | **Core** | `opencv-python`, `numpy`, `pyproj`, `Pillow`, `piexif`, `scipy` |
-| **Optional** | `rasterio` (DEM), `laspy[lazrs]` (LAZ), `gdal` (GeoTIFF export), `python-xmp-toolkit` (XMP IMU in `georeference.py`) |
+| **Optional** | `rasterio` (DEM), `laspy[lazrs]` (LAZ), `gdal` (GeoTIFF export) |
 | **ML / research** | `torch`, `sam2`, `segment-anything` — used by `georeference_sharp.py`, `flood_map.py` (not required for basic georeferencing) |
 
 ## Coordinate and angle conventions (critical)
@@ -55,15 +55,14 @@ Shared math for flat ground: `geo_core.py` (pixel ray → ENU → `pyproj` local
 | `geo_core.py` | Pixel rays, flat-ground intersection, shared `pixel_to_world_flat`, DEM height helpers. |
 | `gcp.py` | Load/save GCPs, `refine_pose_from_gcps`, TPS warp `fit_tps_warp`, residuals. |
 | `vertical_datum.py` | Ellipsoid vs orthometric (EGM96/EGM2008/NAVD88) checks and `transform_height` — avoids mixing EXIF vs terrain vertical datums. |
-| `exif_imu.py` | Central EXIF GPS + IMU parsing (used by `georeference.py` and others). |
+| `exif_imu.py` | Central EXIF GPS + IMU parsing (used by the georeferencing tools). |
 | `camera_calibration.py` | Checkerboard calibration, optional live capture, writes `calibration.json`. |
 | `undistort_tool.py` | Undistortion utilities and batch/interactive viewer. |
 | `calib_filter.py` | Pre-filter calibration images (sharpness, board geometry, diversity). |
 | `georeference_terrain.py` | **Primary** interactive tool: **DEM and/or LAS/LAZ** ray–terrain intersection. |
 | `georeference_tool.py` | Optional **flat-ground** interactive tool (plane model); also used for GCP pose refine when feeding orientation into terrain. |
-| `georeference.py` | Standalone example: EXIF GPS + EXIF/XMP IMU → ground plane. |
 | `georeference3d.py` | Extended 3D-oriented workflow (see file for scope). |
-| `archive/georeference_old.py` | Legacy, archived (see `archive/README.md`); use `geo_core` / current tools. |
+| `archive/georeference_old.py`, `archive/georeference.py` | Legacy, archived (see `archive/README.md`); use `geo_core` / current tools. |
 | `georeference_sharp.py` | SHARP / 3D Gaussian–related pipeline (optional heavy deps). |
 | `flood_map.py` | Segmentation / mapping helpers (optional ML). |
 | `reconstruct3d.py` | 3D reconstruction utilities (see file). |
