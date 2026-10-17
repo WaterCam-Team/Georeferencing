@@ -37,4 +37,4 @@ pip install -r requirements.txt
 ```
 
 Core: `opencv-python`, `numpy`, `pyproj`, `Pillow`, `piexif`, `scipy`.  
-Optional: `rasterio` (DEM), `laspy` (LAS/LAZ), `gdal` (GeoTIFF export), `python-xmp-toolkit` (XMP IMU in `georeference.py`), `torch`/`sam2`/`segment-anything` (SHARP / SAM in `georeference_sharp.py`, `flood_map.py`).
+Optional: `rasterio` (DEM), `laspy` (LAS/LAZ), `gdal` (GeoTIFF export), `torch`/`sam2`/`segment-anything` (SHARP / SAM in `georeference_sharp.py`, `flood_map.py`).

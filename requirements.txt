@@ -17,6 +17,5 @@ pytest>=7.0
 
 # Optional (install as needed):
 # gdal — GeoTIFF export from georeference_tool / other scripts
-# python-xmp-toolkit (libxmp) — XMP IMU fallback in georeference.py
 # torch, sam2 — SHARP / SAM 2 in georeference_sharp, flood_map
 # segment-anything — SAM 1 in flood_map
