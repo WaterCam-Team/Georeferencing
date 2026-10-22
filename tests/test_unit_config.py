@@ -3,6 +3,8 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest
+
 import unit_config
 
 
@@ -57,18 +59,42 @@ class TestResolveHeading:
         heading, src = cfg.resolve_heading(cli_override=None, exif_yaw=300.0)
         assert abs(heading - 120.0) < 0.001   # (300 + 180) % 360
 
-    def test_gps_track_used_when_no_exif_yaw(self):
+    def test_gps_track_not_used(self):
+        # A fixed camera's course over ground is meaningless; the argument is gone.
         cfg = _cfg({"imu_mount_offset_deg": 180.0})
-        heading, src = cfg.resolve_heading(cli_override=None, exif_yaw=None,
-                                           exif_gps_track=75.0)
-        assert heading == 75.0
-        assert src == "exif_gps_track"
+        with pytest.raises(TypeError):
+            cfg.resolve_heading(None, None, 75.0, exif_gps_track=75.0)
+        with pytest.raises(unit_config.HeadingUnavailableError):
+            cfg.resolve_heading(cli_override=None, exif_yaw=None)
 
-    def test_default_zero_when_nothing_available(self):
+    def test_no_silent_default_zero(self):
         cfg = _cfg({})
-        heading, src = cfg.resolve_heading(cli_override=None, exif_yaw=None)
-        assert heading == 0.0
-        assert src == "default"
+        with pytest.raises(unit_config.HeadingUnavailableError, match="heading"):
+            cfg.resolve_heading(cli_override=None, exif_yaw=None)
+
+    def test_exif_yaw_used_when_calib_mag_3(self):
+        cfg = _cfg({})
+        heading, src = cfg.resolve_heading(None, 100.0, calib_mag=3)
+        assert heading == 100.0 and src == "exif_yaw_corrected"
+
+    def test_exif_yaw_refused_when_calib_mag_low(self):
+        cfg = _cfg({})
+        with pytest.raises(unit_config.HeadingUnavailableError, match="CalibMag=2"):
+            cfg.resolve_heading(None, 100.0, calib_mag=2)
+
+    def test_configured_heading_beats_low_calib_mag_with_warning(self, caplog):
+        cfg = _cfg({"heading_deg": 70.0})
+        with caplog.at_level("WARNING"):
+            heading, src = cfg.resolve_heading(None, 100.0, calib_mag=1)
+        assert heading == 70.0 and src == "unit_config"
+        assert "CalibMag=1" in caplog.text
+
+    def test_unknown_calib_mag_warns_but_uses_yaw(self, caplog):
+        cfg = _cfg({})
+        with caplog.at_level("WARNING"):
+            heading, src = cfg.resolve_heading(None, 100.0)
+        assert heading == 100.0
+        assert "CalibMag" in caplog.text
 
     def test_no_corrections_when_no_imu_fields(self):
         # Unit with no IMU fields — offset defaults to 0, exif_yaw passes through unchanged

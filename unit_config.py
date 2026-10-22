@@ -44,6 +44,7 @@ config files, never in a committed one.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 from typing import Any, Optional
@@ -61,6 +62,17 @@ _KNOWN_FIELDS: set[str] = {
     "imu_heading_correction_deg",  # residual correction from validate_heading(); update after calibration
     "imu_calibration_file",        # path to BNO055 offset JSON saved by bno055_calibration.py
 }
+
+
+log = logging.getLogger(__name__)
+
+# EXIF yaw (BNO055 fused heading) is trusted only when the magnetometer
+# calibration status is at its maximum (0-3 scale, 3 = fully calibrated).
+MIN_CALIB_MAG_FOR_EXIF_YAW = 3
+
+
+class HeadingUnavailableError(ValueError):
+    """No trustworthy camera heading could be resolved."""
 
 
 class UnitConfig:
@@ -177,10 +189,25 @@ class UnitConfig:
 
     def resolve_heading(self, cli_override: Optional[float],
                         exif_yaw: Optional[float],
-                        exif_gps_track: Optional[float] = None) -> tuple[float, str]:
+                        calib_mag: Optional[int] = None) -> tuple[float, str]:
         """
         Return (heading_deg, source_label).
-        Source: 'cli' > 'unit_config' > 'exif_yaw' > 'exif_gps_track' > 0.0
+        Source: 'cli' > 'unit_config' > 'exif_yaw_corrected'
+
+        There is deliberately NO further fallback. GPS track (course over
+        ground) is meaningless for a fixed camera, and a silent 0 deg (north)
+        gives a wrong georeference that looks plausible. With no configured
+        heading and no trustworthy EXIF yaw this raises HeadingUnavailableError.
+
+        calib_mag is the BNO055 magnetometer calibration status (0-3) from
+        the EXIF UserComment ("CalibMag n"), or None for older photos that do
+        not record it.
+          * calib_mag == MIN_CALIB_MAG_FOR_EXIF_YAW (3): EXIF yaw is used.
+          * calib_mag < 3: the magnetometer was not fully calibrated, so EXIF
+            yaw is refused (error) unless a configured/surveyed heading
+            exists, in which case that is used and a loud warning is logged.
+          * calib_mag is None: calibration unknown; EXIF yaw is used with a
+            warning.
 
         When heading comes from EXIF, per-unit IMU corrections are applied:
         mount offset, magnetic declination, and post-calibration residual.
@@ -189,16 +216,37 @@ class UnitConfig:
         if cli_override is not None:
             return float(cli_override), "cli"
         if self.heading_deg is not None:
+            if (exif_yaw is not None and calib_mag is not None
+                    and calib_mag < MIN_CALIB_MAG_FOR_EXIF_YAW):
+                log.warning(
+                    "EXIF yaw ignored: magnetometer CalibMag=%s (< %d). "
+                    "Using configured heading %.1f deg.",
+                    calib_mag, MIN_CALIB_MAG_FOR_EXIF_YAW, self.heading_deg)
             return self.heading_deg, "unit_config"
+        if exif_yaw is None:
+            raise HeadingUnavailableError(
+                "No camera heading available: none given on the command line "
+                "or in the unit config (heading_deg), and the photo has no "
+                "EXIF yaw. Set a surveyed heading_deg in the unit config or "
+                "pass --heading. (GPS track is not used: a fixed camera has "
+                "no course over ground.)")
+        if calib_mag is not None and calib_mag < MIN_CALIB_MAG_FOR_EXIF_YAW:
+            raise HeadingUnavailableError(
+                f"EXIF yaw is unreliable: magnetometer calibration CalibMag="
+                f"{calib_mag} (need {MIN_CALIB_MAG_FOR_EXIF_YAW}) and no "
+                "heading_deg is set in the unit config / --heading. Set a "
+                "surveyed heading_deg or use a photo taken after the "
+                "magnetometer was fully calibrated.")
+        if calib_mag is None:
+            log.warning(
+                "Magnetometer calibration status (CalibMag) not recorded in "
+                "this photo; trusting EXIF yaw unverified. Prefer a surveyed "
+                "heading_deg in the unit config.")
         imu_offset = (self.imu_mount_offset_deg
                       + self.imu_magnetic_declination_deg
                       + self.imu_heading_correction_deg)
-        if exif_yaw is not None:
-            corrected = (float(exif_yaw) + imu_offset) % 360.0
-            return corrected, "exif_yaw_corrected"
-        if exif_gps_track is not None:
-            return float(exif_gps_track), "exif_gps_track"
-        return 0.0, "default"
+        corrected = (float(exif_yaw) + imu_offset) % 360.0
+        return corrected, "exif_yaw_corrected"
 
     def resolve_pitch_roll(self,
                            cli_pitch: Optional[float], cli_roll: Optional[float],

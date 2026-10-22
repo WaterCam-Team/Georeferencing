@@ -884,6 +884,7 @@ def main() -> int:
     # Read EXIF GPS and IMU
     exif_altitude = None
     exif_yaw = None
+    exif_calib_mag = None
     exif_pitch = None
     exif_roll = None
     if _HAS_GEOREF_TOOL:
@@ -904,11 +905,16 @@ def main() -> int:
             exif_roll = imu["roll_deg"]
         if exif_yaw is None and imu.get("yaw_deg") is not None:
             exif_yaw = imu["yaw_deg"]
+        exif_calib_mag = imu.get("calib_mag")
     except Exception:
         pass
 
     # Resolve orientation: CLI > unit config > EXIF > 0
-    heading, h_src          = ucfg.resolve_heading(args.heading, exif_yaw)
+    try:
+        heading, h_src      = ucfg.resolve_heading(args.heading, exif_yaw, exif_calib_mag)
+    except _uc.HeadingUnavailableError as e:
+        print(f"[ERR] {e}", file=sys.stderr)
+        sys.exit(2)
     pitch, roll, pr_src     = ucfg.resolve_pitch_roll(args.pitch, args.roll, exif_pitch, exif_roll)
     print(f"[POSE] heading={heading:.2f}° ({h_src})  pitch={pitch:.2f}° ({pr_src})  roll={roll:.2f}° ({pr_src})")
 
