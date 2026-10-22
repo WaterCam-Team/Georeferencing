@@ -17,6 +17,14 @@ Camera calibration and pixel→GPS georeferencing for fixed-position and mobile 
 
 **[Accuracy with coarse GPS/IMU](docs/ACCURACY_AND_EXTERNAL_RESOURCES.md)** — how to combine RTK/survey, ortho GCPs, terrain quality, calibration, and time sync to improve results.
 
+## Heading and GCP requirements
+
+- **Heading:** `--heading` > unit-config `heading_deg` (surveyed) > EXIF yaw, and EXIF yaw only when the magnetometer was fully calibrated (`CalibMag 3`). There is no GPS-track fallback and no default of 0 deg: with no usable heading the tools stop with an error.
+- **GCPs:** pose refinement needs at least 4 (3 give no redundancy). It reports per-point residuals in metres and a leave-one-out check that flags suspect points without dropping them.
+- Flat-ground rays within 2 deg of the horizon or beyond 2000 m are rejected.
+
+Details: [GCPs, heading sources and DEM notes](docs/GEOREFERENCING_PROCEDURE.md#44-heading-sources-ray-limits-and-dem-use).
+
 ## Main scripts
 
 | Script | Purpose |
@@ -41,4 +49,4 @@ pip install -r requirements.txt
 ```
 
 Core: `opencv-python`, `numpy`, `pyproj`, `Pillow`, `piexif`, `scipy`.  
-Optional: `rasterio` (DEM), `laspy` (LAS/LAZ), `gdal` (GeoTIFF export), `python-xmp-toolkit` (XMP IMU in `georeference.py`), `torch`/`sam2`/`segment-anything` (SHARP / SAM in `georeference_sharp.py`, `flood_map.py`).
+Optional: `rasterio` (DEM), `laspy` (LAS/LAZ), `gdal` (GeoTIFF export), `torch`/`sam2`/`segment-anything` (SHARP / SAM in `georeference_sharp.py`, `flood_map.py`).

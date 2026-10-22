@@ -56,11 +56,20 @@ def read_exif_pose(image_path):
     alt = float(data.get("GPSAltitude", 0) or 0)
     pitch = float(data.get("Pitch", 0) or 0)
     roll = float(data.get("Roll", 0) or 0)
-    yaw = float(data.get("Yaw", data.get("GPSTrack", 0)) or 0)
+    # No GPSTrack/0 fallback: a fixed camera has no course over ground.
+    yaw = float(data["Yaw"]) if data.get("Yaw") not in (None, "") else None
+    calib_mag = None
+    try:
+        from exif_imu import parse_user_comment
+        uc_txt = data.get("UserComment")
+        if uc_txt:
+            calib_mag = parse_user_comment(str(uc_txt))["calib_mag"]
+    except Exception:
+        pass
     return {
         "lat": lat, "lon": lon,
         "altitude_m": alt,
-        "heading": yaw, "pitch": pitch, "roll": roll,
+        "heading": yaw, "calib_mag": calib_mag, "pitch": pitch, "roll": roll,
     }
 
 
@@ -299,7 +308,12 @@ def validate(image_path, dem_path, ucfg, pix4d_dir=None, grid_n=7,
     cam_lat, cam_lon = pose["lat"], pose["lon"]
     exif_alt = pose["altitude_m"]
 
-    heading, h_src          = ucfg.resolve_heading(cli_heading, pose.get("heading"), pose.get("heading"))
+    try:
+        heading, h_src      = ucfg.resolve_heading(cli_heading, pose.get("heading"),
+                                                   pose.get("calib_mag"))
+    except _uc.HeadingUnavailableError as e:
+        print(f"[ERR] {e}", file=sys.stderr)
+        sys.exit(2)
     pitch, roll, pr_src     = ucfg.resolve_pitch_roll(cli_pitch, cli_roll, pose.get("pitch"), pose.get("roll"))
 
     print(f"    GPS:      lat={cam_lat:.6f}  lon={cam_lon:.6f}")

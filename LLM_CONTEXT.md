@@ -6,7 +6,7 @@ This file summarizes the **Python georeferencing toolkit** in this repository so
 
 **Camera calibration** and **pixel → geographic coordinates** for fixed or mobile imagery (e.g. flood/field monitoring). Primary mode: **terrain** (DEM GeoTIFF, LAS/LAZ ray casting). Optional: flat ground (plane intersection) for rare flat-site or legacy workflows.
 
-- Orientation from **IMU logs (CSV)** or **EXIF UserComment** (and optional XMP in `georeference.py`).
+- Orientation from **IMU logs (CSV)** or **EXIF UserComment**.
 - **Ground control points (GCPs)** to refine pose and optional thin-plate spline (TPS) warping in pixel space.
 - When onboard **GPS/IMU is coarse**, combine **surveyed positions**, **ortho GCPs** (Planet/Pix4D), and **quality terrain** — see `docs/ACCURACY_AND_EXTERNAL_RESOURCES.md`.
 
@@ -23,7 +23,7 @@ Human-facing workflow: `docs/GEOREFERENCING_PROCEDURE.md` (researcher checklist)
 | Tier | Packages |
 |------|----------|
 | **Core** | `opencv-python`, `numpy`, `pyproj`, `Pillow`, `piexif`, `scipy` |
-| **Optional** | `rasterio` (DEM), `laspy[lazrs]` (LAZ), `gdal` (GeoTIFF export), `python-xmp-toolkit` (XMP IMU in `georeference.py`) |
+| **Optional** | `rasterio` (DEM), `laspy[lazrs]` (LAZ), `gdal` (GeoTIFF export) |
 | **ML / research** | `torch`, `sam2`, `segment-anything` — used by `georeference_sharp.py`, `flood_map.py` (not required for basic georeferencing) |
 
 ## Coordinate and angle conventions (critical)
@@ -58,9 +58,9 @@ This is the one complete list of project files; README and the docs link here ra
 |------|--------|----------------|
 | `camera_geometry.py` | library | `build_rotation_matrix` — ENU ↔ camera; single source of angle conventions. |
 | `geo_core.py` | library | Pixel rays, flat-ground intersection, shared `pixel_to_world_flat`, DEM height helpers. |
-| `gcp.py` | library | Load/save GCPs, `refine_pose_from_gcps`, TPS warp `fit_tps_warp`, residuals. |
+| `gcp.py` | library | Load/save GCPs, `refine_pose_from_gcps` / `refine_pose_with_diagnostics` (≥4 GCPs, residuals in metres, leave-one-out flags), TPS warp `fit_tps_warp`. |
 | `vertical_datum.py` | library | Ellipsoid vs orthometric (EGM96/EGM2008/NAVD88) checks and `transform_height` — avoids mixing EXIF vs terrain vertical datums. |
-| `exif_imu.py` | library | Central EXIF GPS + IMU parsing (used by `georeference.py` and others). |
+| `exif_imu.py` | library | Central EXIF GPS + IMU parsing (used by the georeferencing tools). |
 | `unit_config.py` | library | Per-unit sensor configuration loader (mount, heading, pitch/roll resolution); schema in `unit_config.example.json`. |
 | `georeference_terrain.py` | core | **Primary** interactive tool: **DEM and/or LAS/LAZ** ray–terrain intersection. |
 | `georeference_tool.py` | core | Optional **flat-ground** interactive tool (plane model); also used for GCP pose refine when feeding orientation into terrain. |
@@ -79,14 +79,13 @@ This is the one complete list of project files; README and the docs link here ra
 | `planet_scene_pull.py` | helper | Fetch PlanetScope scenes around a photo's EXIF location (API key required). |
 | `print_aruco_markers.py` | helper | Printable ArUco marker sheets (DICT_4X4_50), output `./markers/`. |
 | `add_imu.py` | helper | Write Roll/Pitch/Yaw into EXIF UserComment. |
-| `georeference.py` | experimental | Standalone example: EXIF GPS + EXIF/XMP IMU → ground plane. |
 | `georeference3d.py` | experimental | GPS-anchored 3D scene reconstruction and click-to-GPS. |
 | `georeference_sharp.py` | experimental | 3D Gaussian Splat (SHARP) scene viewer (optional heavy deps). |
 | `flood_map.py` | experimental | Flood boundary extraction from photos (optional ML: SAM). |
 | `reconstruct3d.py` | experimental | Incremental structure from motion. |
 | `laz-viewer.py` | experimental | Point cloud viewing helper (hard-coded `lidar.laz`). |
 | `syr_lamppost_query.py` | experimental | Query Syracuse open data for candidate mounting poles. |
-| `archive/georeference_old.py` | archived | Legacy (see `archive/README.md`); use `geo_core` / current tools. |
+| `archive/georeference_old.py`, `archive/georeference.py` | archived | Legacy (see `archive/README.md`); use `geo_core` / current tools. |
 | `scripts/dump_dataset_crs.py` | helper | CRS, bounds, nodata, vertical hint (raster), CRS + Z range (LAS/LAZ) — use before new sites. |
 | `scripts/pix4d_to_las_dem.py` | core | Pix4DCatch OPF scan dir → LAZ + DEM GeoTIFF + camera-pose CSV. See `docs/PIX4DCATCH_DATA_FORMAT.md`. |
 | `scripts/pix4d_to_api_json.py` | helper | Export a Pix4DCatch scan to the API dashboard's JSON format. |

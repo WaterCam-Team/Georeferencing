@@ -12,6 +12,7 @@ from gcp import (
     load_gcps,
     save_gcps,
     refine_pose_from_gcps,
+    refine_pose_with_diagnostics,
     fit_tps_warp,
     gcp_residuals,
 )
@@ -102,3 +103,65 @@ def test_gcp_residuals():
     lat_err, lon_err, dist_m = res[0]
     assert abs(lat_err) < 1e-9 and abs(lon_err) < 1e-9
     assert dist_m < 0.01
+
+
+# ── GCP count, metre residuals, leave-one-out (synthetic geometry) ──────────
+
+_K = np.array([[2000, 0, 960], [0, 2000, 540], [0, 0, 1]], dtype=np.float64)
+_LAT, _LON, _H = 10.0, 20.0, 6.0   # synthetic site
+_PIXELS = [(300, 700), (700, 900), (1200, 750), (1600, 950), (900, 650), (500, 1000)]
+
+
+def _synthetic_gcps(n, bad_index=None, bad_offset_deg=0.00008):
+    R = build_rotation_matrix(30.0, -45.0, 0.0)
+    out = []
+    for i, (u, v) in enumerate(_PIXELS[:n]):
+        lat, lon = pixel_to_world_flat(u, v, _K, R, _LAT, _LON, _H)
+        if i == bad_index:
+            lat += bad_offset_deg   # ~9 m north
+        out.append(GroundControlPoint(f"P{i}", u, v, lat, lon, None))
+    return out
+
+
+def _refine(gcps):
+    return refine_pose_with_diagnostics(
+        _K, gcps, _LAT + 1e-4, _LON - 1e-4, _H + 0.3, 31.0, -44.0, 0.5)
+
+
+def test_three_gcps_rejected():
+    from gcp import MIN_GCPS
+    assert MIN_GCPS == 4
+    r = _refine(_synthetic_gcps(3))
+    assert not r.ok
+    out = refine_pose_from_gcps(_K, _synthetic_gcps(3), _LAT, _LON, _H, 30.0, -45.0, 0.0)
+    assert np.isnan(out[4])
+
+
+def test_clean_gcps_have_zero_residuals_and_no_flags():
+    r = _refine(_synthetic_gcps(6))
+    assert r.ok
+    assert r.rms_m < 0.01
+    assert len(r.residuals_m) == 6 and max(r.residuals_m) < 0.01
+    assert r.flagged_labels == []
+
+
+def test_wrong_gcp_flagged_by_leave_one_out_and_reported_in_metres():
+    r = _refine(_synthetic_gcps(6, bad_index=2))
+    assert r.ok
+    assert r.flagged_labels == ["P2"]          # flagged, not dropped
+    assert len(r.residuals_m) == 6
+    assert r.residuals_m[2] > 3.0              # metres, clearly the worst
+    assert r.residuals_m[2] == max(r.residuals_m)
+    loo = {l.label: l for l in r.leave_one_out}
+    assert loo["P2"].rms_without_m < 0.1 * r.rms_m
+
+
+def test_wrong_gcp_flagged_with_four_gcps():
+    r = _refine(_synthetic_gcps(4, bad_index=2))
+    assert r.ok and r.flagged_labels == ["P2"]
+
+
+def test_residuals_are_in_metres_not_degrees():
+    # A 0.00008 deg (~8.9 m) error on one of 6 points must show as metres
+    r = _refine(_synthetic_gcps(6, bad_index=3))
+    assert 1.0 < max(r.residuals_m) < 20.0

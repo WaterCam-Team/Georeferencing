@@ -133,7 +133,7 @@ GCPs are **known geographic positions** (and optionally elevation) that you can 
 
 ### 4.2 How many and where
 
-- Use **at least 3–5 GCPs** per scene; more and well spread (center and corners of the area of interest) improve checks and any future refinement.  
+- Use **at least 4 GCPs** per scene (`gcp.MIN_GCPS`); 5–6 well spread ones (center and corners of the area of interest) are recommended. Pose refinement has 6 unknowns and each GCP gives 2 equations, so 3 points fit exactly with no redundancy: a wrong point is silently absorbed and cannot be detected. Refinement refuses to run with fewer than 4.  
 - Spread GCPs across the **image** (not all in the center) to constrain both position and orientation errors.  
 - Record for each GCP:
   - **Label** (e.g. “GCP1”, “NW corner building”)  
@@ -146,12 +146,24 @@ GCPs are **known geographic positions** (and optionally elevation) that you can 
 **In `georeference_tool.py` (interactive):**
 
 1. Run the tool and load an image with camera pose (EXIF or manual).  
-2. **Add GCPs:** Left-click a point in the image, then press **G**. Enter the **known** latitude, longitude, and optionally elevation for that point. Repeat for at least 3 GCPs (spread across the image).  
-3. **Refine pose:** Press **R** to refine camera position (lat, lon), height, and orientation (heading, pitch, roll) by minimizing the error at GCPs. The tool prints the RMS residual and per-GCP error in metres.  
+2. **Add GCPs:** Left-click a point in the image, then press **G**. Enter the **known** latitude, longitude, and optionally elevation for that point. Repeat for at least 4 GCPs (spread across the image).  
+3. **Refine pose:** Press **R** to refine camera position (lat, lon), height, and orientation (heading, pitch, roll) by minimizing the error at GCPs. The tool prints the RMS residual and per-GCP ground error in metres, plus a **leave-one-out** check: each GCP is removed in turn and the pose re-solved. A point that stands out (removing it explains the misfit, or moves the solution by more than `LOO_SHIFT_FLAG_M` = 2 m) is marked SUSPECT. It is reported, never dropped: check the point's pixel and coordinates. With exactly 4 GCPs each reduced fit is exactly determined, so detection is weak; use 5+.  
+   The minimised residual is the east/north ground distance in **metres** in a local azimuthal-equidistant frame, with a soft-L1 robust loss whose knee is `GCP_F_SCALE_M` = 0.5 m. (Earlier versions minimised degrees with a knee of 0.1 deg, about 11 km, which made the loss effectively plain least squares.)  
+   Refinement assumes **flat ground** and ignores each GCP's `elev_m` (see 4.4).  
 4. **Optional — TPS warp:** With **6 or more** GCPs, press **W** to fit a thin-plate spline from pixel (u, v) to (lat, lon). When TPS is ON, every click uses this warp instead of the camera model, which can improve local accuracy where GCPs are dense.  
 5. **Load/save GCPs:** Press **L** to load GCPs from a CSV file; press **E** to save the current GCPs to CSV (columns: label, pixel_u, pixel_v, lat, lon, elev_m). You can set `GCP_CSV` in the script config to load GCPs automatically on start.
 
 **Validation only (no refinement):** Click each GCP in the image and compare the **predicted** (lat, lon) to known coordinates. Large residuals indicate camera height, heading/pitch bias, or vertical datum issues; use pose refinement (R) or adjust and re-run.
+
+### 4.4 Heading sources, ray limits, and DEM use
+
+**Heading sources** (`UnitConfig.resolve_heading`), in order: `--heading` > `heading_deg` in the unit config (surveyed; preferred) > EXIF yaw (IMU) with the per-unit mount/declination/residual corrections. There is no other fallback: GPS track (course over ground) is meaningless for a fixed camera and is **not** used, and there is no silent default of 0 deg. With no usable source the tools stop with `HeadingUnavailableError` and a message telling you to set `heading_deg` or pass `--heading`.
+
+EXIF yaw is trusted only when the magnetometer calibration status is full: newer photos record `CalibMag n` (0–3) in the UserComment, and yaw is used only when `CalibMag` is 3 (`unit_config.MIN_CALIB_MAG_FOR_EXIF_YAW`). With `CalibMag` below 3 and no configured heading the tools stop; with a configured heading they use it and log a loud warning. Older photos without `CalibMag` use the EXIF yaw with a warning. `exif_imu.read_gps_imu_from_exif` also exposes the other new UserComment words (`Quaternion w,x,y,z`, `Gravity x,y,z`, `PoseTime <ISO>`, `GPSFix CACHED AgeS n`) and XMP fields (`QuaternionW/X/Y/Z`, `GravityX/Y/Z`, `PoseReadTime`, `GPSFixSource`, `GPSFixAgeSeconds`) as `calib_mag`, `quaternion`, `gravity`, `pose_time`, `gps_fix_source`, `gps_fix_age_s`, `xmp`. Cached GPS fixes (`GPSFix CACHED`) are old positions: prefer a surveyed camera position.
+
+**Ray limits (flat ground):** `geo_core.intersect_flat` rejects (returns None, logs at INFO) rays within `MIN_GRAZING_ANGLE_DEG` = 2 deg of the horizon and hits farther than `MAX_GROUND_RANGE_M` = 2000 m from the camera, because a small pitch error there becomes hundreds of metres on the ground.
+
+**Using a DEM in refinement (not implemented):** refinement intersects rays with the plane Z = 0 under the camera and ignores `elev_m`. To use terrain it would need to: (1) put the camera and the DEM in one vertical datum (`camera_elev_from_dem`), (2) replace `intersect_flat` in the residual with the DEM ray intersection used by `georeference_terrain.py` (`ray_intersect_terrain`), (3) compare against GCP positions with `elev_m` in the same datum (and require `elev_m`), and (4) accept that the ray march makes the residual non-smooth, so use a coarse-to-fine march or a finite-difference step larger than the DEM cell. Until then, refine only on near-flat scenes.
 
 ---
 

@@ -95,3 +95,30 @@ def test_intersect_flat_downward_gives_correct_enu():
     assert enu is not None
     assert np.isclose(enu[0], 0.0, atol=1e-9)
     assert np.isclose(enu[1], 0.0, atol=1e-9)
+
+
+def _ray_at_depression(deg):
+    a = np.radians(deg)
+    return np.array([np.cos(a), 0.0, -np.sin(a)])
+
+
+def test_intersect_flat_rejects_grazing_ray():
+    from geo_core import MIN_GRAZING_ANGLE_DEG
+    assert intersect_flat(_ray_at_depression(MIN_GRAZING_ANGLE_DEG - 0.5), 1.0) is None
+    assert intersect_flat(_ray_at_depression(MIN_GRAZING_ANGLE_DEG + 0.5), 1.0) is not None
+
+
+def test_intersect_flat_rejects_beyond_max_range():
+    from geo_core import MAX_GROUND_RANGE_M
+    # 30 m high, 3 deg below horizon -> ~572 m (ok); 100 m high -> ~1908 m (ok)
+    assert intersect_flat(_ray_at_depression(3.0), 30.0) is not None
+    # 120 m high at 3 deg -> ~2290 m > limit
+    far = intersect_flat(_ray_at_depression(3.0), 120.0)
+    assert 120.0 / np.tan(np.radians(3.0)) > MAX_GROUND_RANGE_M
+    assert far is None
+
+
+def test_guard_logs_rejection(caplog):
+    with caplog.at_level("INFO", logger="geo_core"):
+        intersect_flat(_ray_at_depression(0.5), 5.0)
+    assert "Ray rejected" in caplog.text

@@ -114,7 +114,12 @@ def main():
     pose = read_exif_pose(args.image)
     cam_lat, cam_lon = pose["lat"], pose["lon"]
     exif_alt = pose["altitude_m"]
-    heading, h_src = ucfg.resolve_heading(args.heading, pose.get("heading"), pose.get("heading"))
+    try:
+        heading, h_src = ucfg.resolve_heading(args.heading, pose.get("heading"),
+                                              pose.get("calib_mag"))
+    except _uc.HeadingUnavailableError as e:
+        print(f"[ERR] {e}", file=sys.stderr)
+        sys.exit(2)
     pitch, roll, pr_src = ucfg.resolve_pitch_roll(args.pitch, args.roll, pose.get("pitch"), pose.get("roll"))
     print(f"\n[POSE] lat={cam_lat:.6f} lon={cam_lon:.6f} alt={exif_alt:.2f}m")
     print(f"[POSE] heading={heading:.2f}° ({h_src})  pitch={pitch:.2f}° ({pr_src})  roll={roll:.2f}° ({pr_src})")
