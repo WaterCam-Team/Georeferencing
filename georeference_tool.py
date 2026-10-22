@@ -50,7 +50,8 @@ from gcp import (
     GroundControlPoint,
     load_gcps,
     save_gcps,
-    refine_pose_from_gcps,
+    refine_pose_with_diagnostics,
+    MIN_GCPS,
     fit_tps_warp,
     gcp_residuals,
 )
@@ -354,7 +355,7 @@ class ClickGeoreferencer:
         - Left click  : get GPS coordinate of clicked point
         - Right click : label the last clicked point
         - G key       : add last clicked point as GCP (enter known lat, lon [, elev])
-        - R key       : refine camera pose from GCPs (min 3)
+        - R key       : refine camera pose from GCPs (min 4)
         - W key       : toggle TPS warp mode (use 6+ GCPs to map pixel→GPS)
         - L key       : load GCPs from CSV
         - E key       : save GCPs to CSV
@@ -510,34 +511,36 @@ class ClickGeoreferencer:
         self._draw_overlay()
 
     def _refine_pose(self) -> None:
-        """Refine camera pose from GCPs (min 3)."""
-        if len(self.gcps) < 3:
-            print(f"[GCP] Need at least 3 GCPs to refine pose (have {len(self.gcps)}).")
+        """Refine camera pose from GCPs (min MIN_GCPS = 4)."""
+        if len(self.gcps) < MIN_GCPS:
+            print(f"[GCP] Need at least {MIN_GCPS} GCPs to refine pose (have {len(self.gcps)}).")
             return
         K_active = self._get_active_K()
-        (cam_lat, cam_lon, height, R_new, rms_deg,
-         heading_deg, pitch_deg, roll_deg) = refine_pose_from_gcps(
+        ref = refine_pose_with_diagnostics(
             K_active,
             self.gcps,
             self.cam_lat, self.cam_lon, self.height,
             self._heading_deg, self._pitch_deg, self._roll_deg,
         )
-        if np.isnan(rms_deg):
+        if not ref.ok:
             print("[GCP] Pose refinement failed (check GCPs and initial pose).")
             return
-        self.cam_lat = cam_lat
-        self.cam_lon = cam_lon
-        self.height = height
-        self.R = R_new
-        self._heading_deg = heading_deg
-        self._pitch_deg = pitch_deg
-        self._roll_deg = roll_deg
-        rms_m_approx = rms_deg * 111320 * np.cos(np.radians(self.cam_lat))
-        print(f"[GCP] Refined pose: lat={cam_lat:.6f}, lon={cam_lon:.6f}, height={height:.2f} m")
-        print(f"[GCP] RMS residual: ~{rms_m_approx:.3f} m")
-        res = gcp_residuals(K_active, self.R, self.cam_lat, self.cam_lon, self.height, self.gcps)
-        for g, (_, _, err_m) in zip(self.gcps, res):
-            print(f"      {g.label}: {err_m:.2f} m")
+        self.cam_lat = ref.cam_lat
+        self.cam_lon = ref.cam_lon
+        self.height = ref.height_m
+        self.R = ref.R
+        self._heading_deg = ref.heading_deg
+        self._pitch_deg = ref.pitch_deg
+        self._roll_deg = ref.roll_deg
+        print(f"[GCP] Refined pose: lat={ref.cam_lat:.6f}, lon={ref.cam_lon:.6f}, height={ref.height_m:.2f} m")
+        print(f"[GCP] RMS residual: {ref.rms_m:.3f} m")
+        loo = {l.label: l for l in ref.leave_one_out}
+        for g, err_m in zip(self.gcps, ref.residuals_m):
+            l = loo.get(g.label)
+            note = ""
+            if l is not None:
+                note = f"  leave-one-out shift {l.shift_m:.2f} m" + ("  <-- SUSPECT" if l.flagged else "")
+            print(f"      {g.label}: {err_m:.2f} m{note}")
         self._draw_overlay()
 
     def _toggle_tps(self) -> None:
@@ -599,7 +602,7 @@ class ClickGeoreferencer:
         print("  Left click  : get coordinate")
         print("  Right click : label the last point")
         print("  G           : add last clicked point as GCP (enter known lat, lon)")
-        print("  R           : refine camera pose from GCPs (min 3)")
+        print("  R           : refine camera pose from GCPs (min 4)")
         print("  W           : toggle TPS warp (min 6 GCPs) for click→GPS")
         print("  L           : load GCPs from CSV")
         print("  E           : save GCPs to CSV")
@@ -807,7 +810,7 @@ if __name__ == "__main__":
         CAMERA_LON = gps.get("lon", CAMERA_LON)
         CAMERA_ALT = gps.get("altitude", CAMERA_HEIGHT_M)
         if HEADING_DEG is None:
-            HEADING_DEG = gps.get("heading", 0.0)
+            HEADING_DEG = gps.get("heading")
 
     if CAMERA_LAT is None or CAMERA_LON is None:
         raise ValueError("Camera GPS position not found in EXIF. "
@@ -819,6 +822,11 @@ if __name__ == "__main__":
         PITCH_DEG   = imu["pitch"]
         ROLL_DEG    = imu["roll"]
         HEADING_DEG = imu.get("yaw", HEADING_DEG)
+
+    if HEADING_DEG is None:
+        raise ValueError("Camera heading unknown: set HEADING_DEG (surveyed), "
+                         "or provide EXIF GPSImgDirection / an IMU log. "
+                         "There is no default heading.")
 
     # ── BUILD ROTATION MATRIX ─────────────────────────────────────────────────
     R = build_rotation_matrix(HEADING_DEG, PITCH_DEG, ROLL_DEG)

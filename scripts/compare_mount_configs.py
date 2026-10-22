@@ -133,7 +133,7 @@ def run_session(session, base_cfg_data, rtk_truth, aruco_dict, out_dir):
     exif_yaw = gps.get("heading") if gps.get("heading") is not None else imu.get("yaw_deg")
     exif_pitch, exif_roll = imu.get("pitch_deg"), imu.get("roll_deg")
 
-    heading0, h_src = ucfg.resolve_heading(None, exif_yaw)
+    heading0, h_src = ucfg.resolve_heading(None, exif_yaw, imu.get("calib_mag"))
     pitch0, roll0, pr_src = ucfg.resolve_pitch_roll(None, None, exif_pitch, exif_roll)
     height0, mh_src = ucfg.resolve_mount_height(None)
     if height0 is None:

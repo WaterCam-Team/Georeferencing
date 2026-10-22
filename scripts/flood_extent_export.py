@@ -321,7 +321,12 @@ def main() -> int:
               file=sys.stderr)
         return 2
 
-    heading, heading_src = cfg.resolve_heading(args.heading, exif["yaw_deg"])
+    try:
+        heading, heading_src = cfg.resolve_heading(args.heading, exif["yaw_deg"],
+                                                   exif.get("calib_mag"))
+    except uc.HeadingUnavailableError as e:
+        print(f"[ERR] {e}", file=sys.stderr)
+        return 2
     pitch, roll, pr_src  = cfg.resolve_pitch_roll(args.pitch, args.roll,
                                                   exif["pitch_deg"], exif["roll_deg"])
     height,  height_src  = cfg.resolve_mount_height(args.height_above_ground)
