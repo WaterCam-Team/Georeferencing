@@ -77,10 +77,14 @@ class TestResolveHeading:
         heading, src = cfg.resolve_heading(None, 100.0, calib_mag=3)
         assert heading == 100.0 and src == "exif_yaw_corrected"
 
-    def test_exif_yaw_refused_when_calib_mag_low(self):
+    def test_uncalibrated_exif_yaw_is_used_but_marked(self, caplog):
         cfg = _cfg({})
-        with pytest.raises(unit_config.HeadingUnavailableError, match="CalibMag=2"):
-            cfg.resolve_heading(None, 100.0, calib_mag=2)
+        with caplog.at_level("WARNING"):
+            heading, src = cfg.resolve_heading(None, 100.0, calib_mag=2)
+        assert src == "exif_yaw_uncalibrated"
+        assert heading == pytest.approx((100.0 + cfg.imu_mount_offset_deg + cfg.imu_magnetic_declination_deg
+                                         + cfg.imu_heading_correction_deg) % 360.0)
+        assert "CalibMag=2" in caplog.text
 
     def test_configured_heading_beats_low_calib_mag_with_warning(self, caplog):
         cfg = _cfg({"heading_deg": 70.0})

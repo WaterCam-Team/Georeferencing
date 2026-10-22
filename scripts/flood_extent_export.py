@@ -460,6 +460,7 @@ def main() -> int:
         "camera_elev_m":    cam_elev_m,
         "terrain_datum":    terrain_datum,
         "heading_deg":      heading,
+        "heading_source":   heading_src,   # exif_yaw_uncalibrated: an unverified estimate
         "pitch_deg":        pitch,
         "roll_deg":         roll,
         "n_contour_pts":    len(contour),
