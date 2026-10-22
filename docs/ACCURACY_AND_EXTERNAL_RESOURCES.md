@@ -101,6 +101,8 @@ Use **every applicable** step; skip only what you cannot obtain.
 | CRS inspection | `scripts/dump_dataset_crs.py` | Avoid wrong LAS CRS or unknown DEM extent |
 | Planet download (optional) | `planet_scene_pull.py` | Fetch scenes by EXIF location (API key required) |
 
+For every file in the repo, see the [module map](../LLM_CONTEXT.md#module-map).
+
 ---
 
 ## 5. Limitations and honesty

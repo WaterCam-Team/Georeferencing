@@ -38,6 +38,10 @@ Details: [GCPs, heading sources and DEM notes](docs/GEOREFERENCING_PROCEDURE.md#
 | `scripts/dump_dataset_crs.py` | Print CRS, bounds, nodata, and quick stats for rasters and LAS/LAZ before terrain georeferencing |
 | `add_imu.py` | Write Roll/Pitch/Yaw to EXIF UserComment for images |
 
+Every file, with whether it is a library, core tool, helper or experiment: [module map](LLM_CONTEXT.md#module-map).
+
+Keep local data (captures, DEMs, point clouds, site notes) in the gitignored `private/` folder, not the repo root: this repo is public.
+
 ## Dependencies
 
 ```bash
