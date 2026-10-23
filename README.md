@@ -19,7 +19,7 @@ Camera calibration and pixel→GPS georeferencing for fixed-position and mobile 
 
 ## Heading and GCP requirements
 
-- **Heading:** `--heading` > unit-config `heading_deg` (surveyed) > EXIF yaw, and EXIF yaw only when the magnetometer was fully calibrated (`CalibMag 3`). There is no GPS-track fallback and no default of 0 deg: with no usable heading the tools stop with an error.
+- **Heading:** `--heading` > unit-config `heading_deg` (surveyed) > EXIF yaw. EXIF yaw from a magnetometer that wasn't fully calibrated (`CalibMag` below 3) is still used as the best estimate, but marked `exif_yaw_uncalibrated` (logged, and recorded in the exports' `heading_source`). There is no GPS-track fallback and no default of 0 deg: with no heading at all the tools stop with an error.
 - **GCPs:** pose refinement needs at least 4 (3 give no redundancy). It reports per-point residuals in metres and a leave-one-out check that flags suspect points without dropping them.
 - Flat-ground rays within 2 deg of the horizon or beyond 2000 m are rejected.
 

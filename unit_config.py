@@ -192,7 +192,7 @@ class UnitConfig:
                         calib_mag: Optional[int] = None) -> tuple[float, str]:
         """
         Return (heading_deg, source_label).
-        Source: 'cli' > 'unit_config' > 'exif_yaw_corrected'
+        Source: 'cli' > 'unit_config' > 'exif_yaw_corrected' | 'exif_yaw_uncalibrated'
 
         There is deliberately NO further fallback. GPS track (course over
         ground) is meaningless for a fixed camera, and a silent 0 deg (north)
@@ -203,9 +203,11 @@ class UnitConfig:
         the EXIF UserComment ("CalibMag n"), or None for older photos that do
         not record it.
           * calib_mag == MIN_CALIB_MAG_FOR_EXIF_YAW (3): EXIF yaw is used.
-          * calib_mag < 3: the magnetometer was not fully calibrated, so EXIF
-            yaw is refused (error) unless a configured/surveyed heading
-            exists, in which case that is used and a loud warning is logged.
+          * calib_mag < 3: the magnetometer was not fully calibrated. A
+            configured/surveyed heading is preferred; without one, EXIF yaw
+            is still the best estimate and is used, with the source marked
+            "exif_yaw_uncalibrated" and a loud warning, so the result is
+            known to be unverified.
           * calib_mag is None: calibration unknown; EXIF yaw is used with a
             warning.
 
@@ -230,14 +232,15 @@ class UnitConfig:
                 "EXIF yaw. Set a surveyed heading_deg in the unit config or "
                 "pass --heading. (GPS track is not used: a fixed camera has "
                 "no course over ground.)")
+        source = "exif_yaw_corrected"
         if calib_mag is not None and calib_mag < MIN_CALIB_MAG_FOR_EXIF_YAW:
-            raise HeadingUnavailableError(
-                f"EXIF yaw is unreliable: magnetometer calibration CalibMag="
-                f"{calib_mag} (need {MIN_CALIB_MAG_FOR_EXIF_YAW}) and no "
-                "heading_deg is set in the unit config / --heading. Set a "
-                "surveyed heading_deg or use a photo taken after the "
-                "magnetometer was fully calibrated.")
-        if calib_mag is None:
+            log.warning(
+                "HEADING UNCALIBRATED: magnetometer CalibMag=%s (need %d) and no "
+                "heading_deg in the unit config / --heading; using EXIF yaw as the "
+                "best estimate. Set a surveyed heading_deg for a reliable result.",
+                calib_mag, MIN_CALIB_MAG_FOR_EXIF_YAW)
+            source = "exif_yaw_uncalibrated"
+        elif calib_mag is None:
             log.warning(
                 "Magnetometer calibration status (CalibMag) not recorded in "
                 "this photo; trusting EXIF yaw unverified. Prefer a surveyed "
@@ -246,7 +249,7 @@ class UnitConfig:
                       + self.imu_magnetic_declination_deg
                       + self.imu_heading_correction_deg)
         corrected = (float(exif_yaw) + imu_offset) % 360.0
-        return corrected, "exif_yaw_corrected"
+        return corrected, source
 
     def resolve_pitch_roll(self,
                            cli_pitch: Optional[float], cli_roll: Optional[float],
