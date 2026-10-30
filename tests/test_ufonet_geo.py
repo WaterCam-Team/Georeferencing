@@ -166,7 +166,7 @@ def test_sample_dem_grid(tmp_path):
 
     from ufonet_geo.terrain import sample_dem_grid
     lat, lon = g.enu_to_latlon(np.array([0.2, -49.8, 500.0]), np.array([0.2, 49.8, 0.0]), LAT, LON)
-    got = sample_dem_grid(str(path), lat, lon)
+    got = sample_dem_grid(str(path), lat, lon, method="nearest")
     assert got[0] == data[49, 50]
     assert np.isnan(got[1])          # nodata corner
     assert np.isnan(got[2])          # outside the DEM
@@ -188,3 +188,27 @@ def test_auto_cell_size_fits_a_low_camera():
 def test_auto_cell_size_never_coarser_than_the_coarse_pass():
     auto = ortho.build_ground_lookup_auto(K_FRAME, None, W, H, R, LAT, LON, 3.0)
     assert auto.res_m <= 0.5
+
+
+
+def test_sample_dem_grid_bilinear_follows_a_slope(tmp_path):
+    rasterio = pytest.importorskip("rasterio")
+    from pyproj import Transformer
+    from rasterio.transform import from_origin
+    from ufonet_geo.terrain import sample_dem_grid
+
+    x0, y0 = Transformer.from_crs("EPSG:4326", "EPSG:32618", always_xy=True).transform(LON, LAT)
+    cols = np.arange(50, dtype=np.float32)
+    data = np.tile(cols * 0.3, (50, 1))         # rises 0.3 m per 1 m cell to the east
+    path = tmp_path / "slope.tif"
+    with rasterio.open(path, "w", driver="GTiff", width=50, height=50, count=1, dtype="float32",
+                       crs="EPSG:32618", transform=from_origin(x0 - 25, y0 + 25, 1.0, 1.0)) as dst:
+        dst.write(data, 1)
+    e = np.linspace(-10, 10, 81)
+    lat, lon = g.enu_to_latlon(e, np.zeros_like(e), LAT, LON)
+    z = sample_dem_grid(str(path), lat, lon)
+    steps = np.diff(z)
+    assert np.allclose(steps, steps.mean(), atol=0.02)   # smooth, no 0.3 m stairs
+    assert steps.mean() == pytest.approx(0.3 * 0.25, rel=0.05)
+    zn = sample_dem_grid(str(path), lat, lon, method="nearest")
+    assert np.abs(np.diff(zn)).max() == pytest.approx(0.3, abs=1e-4)
