@@ -1,5 +1,5 @@
 # Core (calibration + flat/terrain georeferencing)
-opencv-python>=4.8
+opencv-python>=4.8,<5   # 5.0 drops cv2.AKAZE_create (drone_gcp_match.py)
 numpy>=1.24
 pyproj>=3.6
 Pillow>=10.0
