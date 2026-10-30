@@ -170,3 +170,21 @@ def test_sample_dem_grid(tmp_path):
     assert got[0] == data[49, 50]
     assert np.isnan(got[1])          # nodata corner
     assert np.isnan(got[2])          # outside the DEM
+
+
+def test_auto_cell_size_fits_a_low_camera():
+    # 0.84 m up, 30 deg down: the camera sees only to the grazing limit, ~24 m.
+    Rl = g.build_rotation_matrix(70.0, -30.0, 0.0)
+    coarse = ortho.build_ground_lookup(K_FRAME, None, W, H, Rl, LAT, LON, 0.84, res_m=0.5)
+    auto = ortho.build_ground_lookup_auto(K_FRAME, None, W, H, Rl, LAT, LON, 0.84)
+    assert auto.res_m == pytest.approx(auto.meta["max_range_m"] / 300)   # ~300 cells out to the farthest ground
+    assert np.count_nonzero(auto.seen()) > 0.7 * (0.5 / auto.res_m) ** 2 * np.count_nonzero(coarse.seen())
+    # The seen area agrees, and is now measured in small cells rather than a few big ones.
+    assert np.count_nonzero(auto.seen()) * auto.res_m ** 2 == pytest.approx(
+        np.count_nonzero(coarse.seen()) * 0.25, rel=0.35)
+    assert max(auto.shape) <= 2 * 300 + 4
+
+
+def test_auto_cell_size_never_coarser_than_the_coarse_pass():
+    auto = ortho.build_ground_lookup_auto(K_FRAME, None, W, H, R, LAT, LON, 3.0)
+    assert auto.res_m <= 0.5
