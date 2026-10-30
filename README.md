@@ -38,6 +38,29 @@ Details: [GCPs, heading sources and DEM notes](docs/GEOREFERENCING_PROCEDURE.md#
 | `scripts/dump_dataset_crs.py` | Print CRS, bounds, nodata, and quick stats for rasters and LAS/LAZ before terrain georeferencing |
 | `add_imu.py` | Write Roll/Pitch/Yaw to EXIF UserComment for images |
 
+## Shared package: `ufonet_geo`
+
+The core math lives in the `ufonet_geo/` package. The scripts above use it,
+and so does the WaterCam API server (the dashboard's georeferencing and flood map):
+
+| Module | What |
+|--------|------|
+| `geometry` | rotation matrix, lens model (incl. the undistorted frame's camera matrix), rays, flat ground with the grazing/range guards, ENU ↔ lat/lon |
+| `pose` | heading / pitch / roll / position from a unit config and EXIF (the precedence and `CalibMag` rules above) |
+| `terrain` | DEM sampling, camera elevation, ray / terrain intersection |
+| `ortho` | a fixed camera's flood mask on a north-up ground grid (`build_ground_lookup`, `GroundLookup.render`) |
+
+It needs only numpy; the `dem` extra adds rasterio and pyproj. `camera_geometry.py`,
+`geo_core.py`, `unit_config.py`, `exif_imu.py` and `georeference_terrain.py`
+re-export from it, so existing imports keep working. Change the math in the
+package, not in a copy.
+
+Another project pins it by commit, without needing git in its build:
+
+```
+ufonet-geo @ https://github.com/WaterCam-Team/Georeferencing/archive/<commit>.tar.gz
+```
+
 Every file, with whether it is a library, core tool, helper or experiment: [module map](LLM_CONTEXT.md#module-map).
 
 Keep local data (captures, DEMs, point clouds, site notes) in the gitignored `private/` folder, not the repo root: this repo is public.

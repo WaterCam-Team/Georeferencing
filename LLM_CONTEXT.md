@@ -28,7 +28,7 @@ Human-facing workflow: `docs/GEOREFERENCING_PROCEDURE.md` (researcher checklist)
 
 ## Coordinate and angle conventions (critical)
 
-Defined in `camera_geometry.py` and `docs/GEOREFERENCING_PROCEDURE.md`:
+Defined in `ufonet_geo/geometry.py` and `docs/GEOREFERENCING_PROCEDURE.md`:
 
 - **World:** ENU — X East, Y North, Z Up.
 - **Camera:** X right, Y down, Z forward (into scene).
@@ -36,7 +36,7 @@ Defined in `camera_geometry.py` and `docs/GEOREFERENCING_PROCEDURE.md`:
 - **Pitch:** 0° = level; **negative** = looking down.
 - **Roll:** 0° = level; positive = right side of camera tilts down.
 
-Shared math for flat ground: `geo_core.py` (pixel ray → ENU → `pyproj` local azimuthal equidistant to lat/lon).
+Shared math: the `ufonet_geo` package (pixel ray → ENU → lat/lon on a local tangent plane with WGS84 radii; about 1 mm off pyproj's geodesic at 100 m).
 
 ## Data formats
 
@@ -56,8 +56,9 @@ This is the one complete list of project files; README and the docs link here ra
 
 | File | Status | Responsibility |
 |------|--------|----------------|
-| `camera_geometry.py` | library | `build_rotation_matrix` — ENU ↔ camera; single source of angle conventions. |
-| `geo_core.py` | library | Pixel rays, flat-ground intersection, shared `pixel_to_world_flat`, DEM height helpers. |
+| `ufonet_geo/` | library | The shared package (also used by the API): `geometry`, `pose`, `terrain`, `ortho`. Change the math here. |
+| `camera_geometry.py` | library | Re-exports `ufonet_geo.geometry.build_rotation_matrix` for existing imports. |
+| `geo_core.py` | library | Re-exports pixel rays, flat-ground intersection, `pixel_to_world_flat` and `camera_elev_from_dem` from `ufonet_geo`. |
 | `gcp.py` | library | Load/save GCPs, `refine_pose_from_gcps` / `refine_pose_with_diagnostics` (≥4 GCPs, residuals in metres, leave-one-out flags), TPS warp `fit_tps_warp`. |
 | `vertical_datum.py` | library | Ellipsoid vs orthometric (EGM96/EGM2008/NAVD88) checks and `transform_height` — avoids mixing EXIF vs terrain vertical datums. |
 | `exif_imu.py` | library | Central EXIF GPS + IMU parsing (used by the georeferencing tools). |
@@ -98,9 +99,9 @@ This is the one complete list of project files; README and the docs link here ra
 | `scripts/compare_mount_configs.py` | helper | Compare EXIF pose vs GCP-refined pose across mount configs. |
 | `scripts/collect_subdir_jpegs.py` | helper | Flatten JPEGs from a folder tree into one folder. |
 
-Copies elsewhere: SU-WaterCam `tools/` vendors `camera_geometry.py`, `geo_core.py` and a diverged `camera_calibration.py`;
-the API ports the math into `app/georef_math.py` and `app/dem_math.py`. A fix here does not reach them yet
-(see the shared-package plan in the `documentation` repo, `GEOREF_SHARED_MATH_PLAN.md`).
+Copies elsewhere: SU-WaterCam `tools/` vendors `camera_geometry.py`, `geo_core.py` and a diverged `camera_calibration.py`
+(step 4 of the shared-package plan, `documentation/GEOREF_SHARED_MATH_PLAN.md`, not done yet). The API's ports in
+`app/georef_math.py` and `app/dem_math.py` move onto `ufonet_geo`; `tests/test_golden_api.py` holds their recorded outputs.
 
 ## Tests
 
@@ -122,7 +123,7 @@ Under `tests/`, one file per module or tool. Run `pytest` from repo root.
 
 ## Editing guidance for LLMs
 
-- Prefer **`geo_core.py`** + **`camera_geometry.py`** for consistent flat-ground behavior; **`gcp.py`** for GCP/TPS.
+- Put shared math in **`ufonet_geo/`** (numpy only in the core; rasterio/pyproj only inside functions); **`gcp.py`** for GCP/TPS.
 - When changing vertical behavior, coordinate with **`vertical_datum.py`** and terrain scripts.
 - When improving workflows for **coarse GPS/IMU**, read **`docs/ACCURACY_AND_EXTERNAL_RESOURCES.md`** and keep it in sync with script behavior.
 - Keep optional imports (rasterio, laspy, XMP, torch) **gracefully optional** where the existing code already does so.

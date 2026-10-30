@@ -12,61 +12,13 @@ import re
 from pathlib import Path
 from typing import Optional
 
-# SU-WaterCam / add_imu.py UserComment format
-_IMU_RE = re.compile(
-    r"Roll\s+([-\d.]+)\s+Pitch\s+([-\d.]+)\s+Yaw\s+([-\d.]+)",
-    re.IGNORECASE,
-)
-
-
-_CALIB_RE = re.compile(r"CalibMag\s+(\d+)", re.IGNORECASE)
-_NUM = r"([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
-_QUAT_RE = re.compile(r"Quaternion\s+" + ",".join([_NUM] * 4) , re.IGNORECASE)
-_GRAV_RE = re.compile(r"Gravity\s+" + ",".join([_NUM] * 3), re.IGNORECASE)
-_POSE_TIME_RE = re.compile(r"PoseTime\s+(\S+)", re.IGNORECASE)
-_GPSFIX_RE = re.compile(r"GPSFix\s+(\w+)(?:\s+AgeS\s+" + _NUM + ")?", re.IGNORECASE)
+# The UserComment parser lives in the package; re-exported for existing callers.
+from ufonet_geo.pose import parse_user_comment  # noqa: F401
 
 # XMP tag names written by newer SU-WaterCam photos (attribute or element form)
 _XMP_NUM_TAGS = ("QuaternionW", "QuaternionX", "QuaternionY", "QuaternionZ",
                  "GravityX", "GravityY", "GravityZ", "GPSFixAgeSeconds")
 _XMP_STR_TAGS = ("PoseReadTime", "GPSFixSource")
-
-
-def parse_user_comment(txt: str) -> dict:
-    """
-    Parse the SU-WaterCam UserComment string. Tolerates old photos (only
-    "Roll R Pitch P Yaw Y") and the newer extra words:
-      CalibMag n | Quaternion w,x,y,z | Gravity x,y,z | PoseTime <ISO> |
-      GPSFix CACHED AgeS n
-    Missing items are None. Returns keys: roll_deg, pitch_deg, yaw_deg,
-    calib_mag, quaternion (w,x,y,z), gravity (x,y,z), pose_time,
-    gps_fix_source, gps_fix_age_s.
-    """
-    out = {"roll_deg": None, "pitch_deg": None, "yaw_deg": None,
-           "calib_mag": None, "quaternion": None, "gravity": None,
-           "pose_time": None, "gps_fix_source": None, "gps_fix_age_s": None}
-    m = _IMU_RE.search(txt)
-    if m:
-        out["roll_deg"], out["pitch_deg"], out["yaw_deg"] = (
-            float(m.group(1)), float(m.group(2)), float(m.group(3)))
-    m = _CALIB_RE.search(txt)
-    if m:
-        out["calib_mag"] = int(m.group(1))
-    m = _QUAT_RE.search(txt)
-    if m:
-        out["quaternion"] = tuple(float(g) for g in m.groups())
-    m = _GRAV_RE.search(txt)
-    if m:
-        out["gravity"] = tuple(float(g) for g in m.groups())
-    m = _POSE_TIME_RE.search(txt)
-    if m:
-        out["pose_time"] = m.group(1)
-    m = _GPSFIX_RE.search(txt)
-    if m:
-        out["gps_fix_source"] = m.group(1).upper()
-        if m.group(2) is not None:
-            out["gps_fix_age_s"] = float(m.group(2))
-    return out
 
 
 def parse_xmp_pose(data: bytes) -> dict:

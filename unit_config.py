@@ -44,10 +44,12 @@ config files, never in a committed one.
 from __future__ import annotations
 
 import json
-import logging
-import math
 import os
 from typing import Any, Optional
+
+from ufonet_geo import pose as _pose
+# Re-exported: the resolution rules live in ufonet_geo.pose, shared with the API.
+from ufonet_geo.pose import HeadingUnavailableError, MIN_CALIB_MAG_FOR_EXIF_YAW  # noqa: F401
 
 
 _REQUIRED_FIELDS: list[str] = []          # none strictly required
@@ -63,16 +65,6 @@ _KNOWN_FIELDS: set[str] = {
     "imu_calibration_file",        # path to BNO055 offset JSON saved by bno055_calibration.py
 }
 
-
-log = logging.getLogger(__name__)
-
-# EXIF yaw (BNO055 fused heading) is trusted only when the magnetometer
-# calibration status is at its maximum (0-3 scale, 3 = fully calibrated).
-MIN_CALIB_MAG_FOR_EXIF_YAW = 3
-
-
-class HeadingUnavailableError(ValueError):
-    """No trustworthy camera heading could be resolved."""
 
 
 class UnitConfig:
@@ -172,161 +164,32 @@ class UnitConfig:
                          exif_lat: Optional[float] = None,
                          exif_lon: Optional[float] = None,
                          ) -> tuple[Optional[float], Optional[float], str]:
-        """
-        Return (lat, lon, source_label).
-        Source: 'cli' > 'unit_config' > 'exif' > (None, None, 'none')
-
-        A surveyed position in the unit config (RTK, ~cm) beats the unit's own
-        GPS fix in EXIF (several metres of noise).
-        """
-        if cli_lat is not None and cli_lon is not None:
-            return float(cli_lat), float(cli_lon), "cli"
-        if self.camera_lat is not None and self.camera_lon is not None:
-            return self.camera_lat, self.camera_lon, "unit_config"
-        if exif_lat is not None and exif_lon is not None:
-            return float(exif_lat), float(exif_lon), "exif"
-        return None, None, "none"
+        """(lat, lon, source): 'cli' > 'unit_config' > 'exif'. See ufonet_geo.pose.resolve_position."""
+        return _pose.resolve_position(self._d, cli_lat, cli_lon, exif_lat, exif_lon)
 
     def resolve_heading(self, cli_override: Optional[float],
                         exif_yaw: Optional[float],
                         calib_mag: Optional[int] = None) -> tuple[float, str]:
         """
-        Return (heading_deg, source_label).
-        Source: 'cli' > 'unit_config' > 'exif_yaw_corrected' | 'exif_yaw_uncalibrated'
-
-        There is deliberately NO further fallback. GPS track (course over
-        ground) is meaningless for a fixed camera, and a silent 0 deg (north)
-        gives a wrong georeference that looks plausible. With no configured
-        heading and no trustworthy EXIF yaw this raises HeadingUnavailableError.
-
-        calib_mag is the BNO055 magnetometer calibration status (0-3) from
-        the EXIF UserComment ("CalibMag n"), or None for older photos that do
-        not record it.
-          * calib_mag == MIN_CALIB_MAG_FOR_EXIF_YAW (3): EXIF yaw is used.
-          * calib_mag < 3: the magnetometer was not fully calibrated. A
-            configured/surveyed heading is preferred; without one, EXIF yaw
-            is still the best estimate and is used, with the source marked
-            "exif_yaw_uncalibrated" and a loud warning, so the result is
-            known to be unverified.
-          * calib_mag is None: calibration unknown; EXIF yaw is used with a
-            warning.
-
-        When heading comes from EXIF, per-unit IMU corrections are applied:
-        mount offset, magnetic declination, and post-calibration residual.
-        unit_config and cli values are assumed to already be true headings.
+        (heading_deg, source): 'cli' > 'unit_config' > 'exif_yaw_corrected' |
+        'exif_yaw_uncalibrated'; raises HeadingUnavailableError with none.
+        See ufonet_geo.pose.resolve_heading for the CalibMag rules.
         """
-        if cli_override is not None:
-            return float(cli_override), "cli"
-        if self.heading_deg is not None:
-            if (exif_yaw is not None and calib_mag is not None
-                    and calib_mag < MIN_CALIB_MAG_FOR_EXIF_YAW):
-                log.warning(
-                    "EXIF yaw ignored: magnetometer CalibMag=%s (< %d). "
-                    "Using configured heading %.1f deg.",
-                    calib_mag, MIN_CALIB_MAG_FOR_EXIF_YAW, self.heading_deg)
-            return self.heading_deg, "unit_config"
-        if exif_yaw is None:
-            raise HeadingUnavailableError(
-                "No camera heading available: none given on the command line "
-                "or in the unit config (heading_deg), and the photo has no "
-                "EXIF yaw. Set a surveyed heading_deg in the unit config or "
-                "pass --heading. (GPS track is not used: a fixed camera has "
-                "no course over ground.)")
-        source = "exif_yaw_corrected"
-        if calib_mag is not None and calib_mag < MIN_CALIB_MAG_FOR_EXIF_YAW:
-            log.warning(
-                "HEADING UNCALIBRATED: magnetometer CalibMag=%s (need %d) and no "
-                "heading_deg in the unit config / --heading; using EXIF yaw as the "
-                "best estimate. Set a surveyed heading_deg for a reliable result.",
-                calib_mag, MIN_CALIB_MAG_FOR_EXIF_YAW)
-            source = "exif_yaw_uncalibrated"
-        elif calib_mag is None:
-            log.warning(
-                "Magnetometer calibration status (CalibMag) not recorded in "
-                "this photo; trusting EXIF yaw unverified. Prefer a surveyed "
-                "heading_deg in the unit config.")
-        imu_offset = (self.imu_mount_offset_deg
-                      + self.imu_magnetic_declination_deg
-                      + self.imu_heading_correction_deg)
-        corrected = (float(exif_yaw) + imu_offset) % 360.0
-        return corrected, source
+        return _pose.resolve_heading(self._d, cli_override, exif_yaw, calib_mag)
 
     def resolve_pitch_roll(self,
                            cli_pitch: Optional[float], cli_roll: Optional[float],
                            exif_pitch: Optional[float], exif_roll: Optional[float],
                            ) -> tuple[float, float, str]:
         """
-        Return (pitch_deg, roll_deg, source_label).
-        Source: 'cli' > 'unit_config' > 'exif_corrected' > 'exif' > 0.0
-
-        Raw EXIF pitch comes straight from the BNO055 hardware Euler register
-        (SU-WaterCam's bno055_imu.py / add_metadata.py write it unmodified,
-        by design). Its native sign convention is the OPPOSITE of this
-        module's (0deg=level, -90deg=straight down) — confirmed empirically
-        2026-07-15 via RTK-validated GCP refinement on two independent units
-        (imu_mount_offset_deg=0 and =180): the raw/passthrough pitch pointed
-        the camera above the horizon in both cases.
-
-        Root cause (confirmed 2026-07-16 against the Bosch datasheet,
-        BST-BNO055-DS000-18 rev1.8, Table 3-13 "Rotation angle conventions",
-        p.32, and the UNIT_SEL register default in the Page-0 register map,
-        ~p.56): the BNO055 has two selectable Euler output formats, Android
-        vs. Windows, and PITCH is defined with opposite sign between them
-        ("turning clockwise decreases values" in Android vs. "increases
-        values" in Windows). UNIT_SEL powers on to 0x80 (Android format,
-        bit 7 set) and the vendored `adafruit_bno055` driver never writes
-        UNIT_SEL, so the sensor stays in Android format — opposite of what
-        this module assumes. Roll and Heading/Yaw are explicitly
-        format-independent per the same table (identical convention in both
-        formats), which is why only pitch needs this correction; empirically
-        confirmed too (2026-07-16 roll-isolation test against RTK ground
-        truth showed no sign inversion for roll).
-
-        So raw EXIF pitch is negated first, before the mount-offset rotation
-        below is applied. Roll is left as-is.
-
-        When both values come from EXIF, the mount rotation is then applied:
-            corrected_pitch = pitch * cos(θ) − roll * sin(θ)
-            corrected_roll  = pitch * sin(θ) + roll * cos(θ)
-        where θ = imu_mount_offset_deg and pitch is the sign-corrected value
-        above. This un-does the apparent pitch/roll swap introduced by
-        mounting the sensor at an arbitrary yaw angle relative to the camera
-        body.
-
-        CLI and unit_config values are assumed to already be in camera frame.
+        (pitch_deg, roll_deg, source): 'cli' > 'unit_config' > 'exif_corrected'
+        > 'exif' > 'default'. Raw EXIF pitch is negated (BNO055 Android Euler
+        format); see ufonet_geo.pose.resolve_pitch_roll for the root cause.
         """
-        if cli_pitch is not None or cli_roll is not None:
-            p = float(cli_pitch) if cli_pitch is not None else 0.0
-            r = float(cli_roll)  if cli_roll  is not None else 0.0
-            return p, r, "cli"
-
-        if self.pitch_deg is not None or self.roll_deg is not None:
-            p = self.pitch_deg if self.pitch_deg is not None else 0.0
-            r = self.roll_deg  if self.roll_deg  is not None else 0.0
-            return p, r, "unit_config"
-
-        if exif_pitch is not None and exif_roll is not None:
-            theta = math.radians(self.imu_mount_offset_deg)
-            p = -float(exif_pitch)
-            r = float(exif_roll)
-            corrected_pitch = p * math.cos(theta) - r * math.sin(theta)
-            corrected_roll  = p * math.sin(theta) + r * math.cos(theta)
-            return corrected_pitch, corrected_roll, "exif_corrected"
-
-        # Partial EXIF — only one axis available, pass through without rotation
-        if exif_pitch is not None:
-            return -float(exif_pitch), 0.0, "exif"
-        if exif_roll is not None:
-            return 0.0, float(exif_roll), "exif"
-
-        return 0.0, 0.0, "default"
+        return _pose.resolve_pitch_roll(self._d, cli_pitch, cli_roll, exif_pitch, exif_roll)
 
     def resolve_mount_height(self, cli_override: Optional[float]) -> tuple[Optional[float], str]:
-        if cli_override is not None:
-            return float(cli_override), "cli"
-        if self.mount_height_m is not None:
-            return self.mount_height_m, "unit_config"
-        return None, "none"
+        return _pose.resolve_mount_height(self._d, cli_override)
 
     def resolve_camera_elev_datum(self, cli_override: Optional[str]) -> str:
         from vertical_datum import VERTICAL_ELLIPSOID
