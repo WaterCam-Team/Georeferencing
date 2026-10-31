@@ -19,6 +19,14 @@ Workflow
      flood_extent.tif       — binary GeoTIFF (1=flood, 0=dry, EPSG:4326)
      flood_boundary.csv     — tabular GPS boundary points
 
+--method ortho (ufonet_geo.ortho) instead maps every mask pixel onto a
+north-up ground grid: all water areas, holes kept, lens distortion applied
+(--mask-frame raw) or the node's undistorted frame (--mask-frame undistorted),
+cells hidden behind higher terrain left out. It writes flood_ortho.tif
+(2 water, 1 dry, 0 not seen) and flood_extent.geojson (one polygon per water
+area). The contour method stays the default; it ignores lens distortion and
+keeps only the largest water area.
+
 Typical usage
 -------------
     # With unit config (reads position, mount height + heading from JSON):
@@ -52,6 +60,7 @@ import csv
 import json
 import sys
 from pathlib import Path
+from functools import partial
 from typing import Callable, Optional
 
 import cv2
@@ -78,6 +87,9 @@ from georeference_terrain import (
     pixel_to_gps_terrain,
 )
 from flood_map import mask_to_contour
+from ufonet_geo import ortho
+from ufonet_geo.geometry import undistorted_camera_matrix
+from ufonet_geo.terrain import sample_dem_grid
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +264,37 @@ def export_csv(gps_points: list[dict], out_path: Path) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+def export_ortho(lookup: "ortho.GroundLookup", flood_mask: np.ndarray, out_dir: Path,
+                 properties: dict) -> dict:
+    """
+    Write the mask orthorectified on a north-up ground grid (--method ortho):
+      flood_ortho.tif        — uint8 EPSG:4326: 2 = water, 1 = dry, 0 = not seen (nodata)
+      flood_extent.geojson   — every water area as a polygon (holes kept)
+    Returns the areas (m²).
+    """
+    from rasterio.features import shapes
+
+    classes = lookup.render(flood_mask)
+    south, west, north, east = lookup.bounds()
+    rows, cols = classes.shape
+    transform = transform_from_bounds(west, south, east, north, cols, rows)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with rasterio.open(out_dir / "flood_ortho.tif", "w", driver="GTiff", height=rows, width=cols,
+                       count=1, dtype="uint8", crs=RasterioCRS.from_epsg(4326),
+                       transform=transform, nodata=ortho.UNSEEN) as dst:
+        dst.write(classes, 1)
+    water = (classes == ortho.WATER).astype(np.uint8)
+    areas = {"water_area_m2": lookup.area_m2(classes, ortho.WATER),
+             "seen_area_m2": lookup.area_m2(classes, ortho.WATER) + lookup.area_m2(classes, ortho.DRY)}
+    features = [{"type": "Feature", "geometry": geom, "properties": {**properties, **areas}}
+                for geom, val in shapes(water, mask=water.astype(bool), transform=transform) if val == 1]
+    export_geojson({"type": "FeatureCollection", "features": features}, out_dir / "flood_extent.geojson")
+    print(f"  GeoTIFF → {out_dir / 'flood_ortho.tif'}  ({cols}×{rows} cells, {lookup.res_m} m)")
+    print(f"  Water {areas['water_area_m2']:.0f} m² of {areas['seen_area_m2']:.0f} m² seen, "
+          f"{len(features)} polygon(s)")
+    return areas
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Export flood extent from a binary mask to GeoJSON + GeoTIFF.",
@@ -290,6 +333,14 @@ def parse_args() -> argparse.Namespace:
                    help="Terrain ray march step in metres (default: 0.5)")
     p.add_argument("--max-range-m", type=float, default=500.0,
                    help="Maximum terrain ray range in metres (default: 500)")
+    p.add_argument("--method", choices=("contour", "ortho"), default="contour",
+                   help="contour: project the largest water outline (default). ortho: map every "
+                        "mask pixel onto a ground grid (all water areas, holes, lens distortion)")
+    p.add_argument("--mask-frame", choices=("raw", "undistorted"), default="raw",
+                   help="ortho: the mask is on the raw photo (raw, default) or on a node's "
+                        "undistorted frame (alpha=1, SU-WaterCam's segmentation input)")
+    p.add_argument("--ortho-res-m", type=float, default=0.25,
+                   help="ortho: ground cell size in metres (default: 0.25)")
     p.add_argument("--resolution-deg", type=float, default=0.00001,
                    help="GeoTIFF output resolution in degrees (~1.1m at 43°N; default: 0.00001)")
     return p.parse_args()
@@ -414,6 +465,33 @@ def main() -> int:
     flood_px = int(flood_mask.sum())
     print(f"  Flood pixels: {flood_px:,} / {h_img * w_img:,} "
           f"({100 * flood_px / (h_img * w_img):.1f}%)")
+
+    if args.method == "ortho":
+        if height is None:
+            print("[ERR] --method ortho needs the camera height above ground "
+                  "(--height-above-ground or mount_height_m in the unit config).", file=sys.stderr)
+            return 2
+        if args.mask_frame == "undistorted":
+            K_frame, D_frame = undistorted_camera_matrix(K, D, w_img, h_img, alpha=1.0), None
+        else:
+            K_frame, D_frame = K, D
+        if args.dem:
+            sampler = partial(sample_dem_grid, args.dem)
+        else:   # LAS only: one terrain lookup per cell (slow on big grids)
+            sampler = np.vectorize(lambda la, lo: (lambda z: np.nan if z is None else z)(get_elevation(lo, la)))
+        print(f"\n=== Orthorectifying ({args.ortho_res_m} m cells, {args.mask_frame} frame) ===")
+        lookup = ortho.build_ground_lookup(K_frame, D_frame, w_img, h_img, R, cam_lat, cam_lon, height,
+                                           dem_sampler=sampler, res_m=args.ortho_res_m,
+                                           max_range_m=args.max_range_m)
+        print(f"\n=== Exporting to {out_dir} ===")
+        export_ortho(lookup, flood_mask, out_dir, {
+            "image": image_path.name, "camera_lat": cam_lat, "camera_lon": cam_lon,
+            "heading_deg": heading, "heading_source": heading_src, "pitch_deg": pitch,
+            "roll_deg": roll, "mount_height_m": height, "method": "ortho",
+            "mask_frame": args.mask_frame,
+        })
+        print(f"\nDone. Open flood_extent.geojson or flood_ortho.tif in QGIS.")
+        return 0
 
     # ── Contour ──────────────────────────────────────────────────────────────
     print(f"\n=== Extracting contour (ε={args.epsilon} px, min_area={args.min_area} px) ===")

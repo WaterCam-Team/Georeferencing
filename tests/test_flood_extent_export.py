@@ -272,3 +272,46 @@ def test_main_end_to_end_with_surveyed_position(tmp_path, monkeypatch):
     # Camera faces east and looks down, so the flood polygon lies east of it.
     assert all(lon > lon0 for lon, _ in ring)
     assert (out / "flood_extent.tif").exists() and (out / "flood_boundary.csv").exists()
+
+
+# ---------------------------------------------------------------------------
+# --method ortho, end to end
+# ---------------------------------------------------------------------------
+
+def test_cli_ortho_writes_every_water_area(tmp_path):
+    import subprocess
+
+    import cv2
+    from rasterio.transform import from_origin
+
+    lat, lon = 40.7128, -74.0060          # placeholder site
+    photo = tmp_path / "photo.jpg"
+    cv2.imwrite(str(photo), np.full((480, 640, 3), 90, dtype=np.uint8))
+    mask = np.zeros((480, 640), dtype=np.uint8)
+    mask[300:420, 50:250] = 255           # two separate water areas, one with a hole
+    mask[300:420, 400:600] = 255
+    mask[340:380, 470:530] = 0
+    cv2.imwrite(str(tmp_path / "mask.png"), mask)
+    px = 0.00001
+    with rasterio.open(tmp_path / "dem.tif", "w", driver="GTiff", width=600, height=600, count=1,
+                       dtype="float32", crs="EPSG:4326",
+                       transform=from_origin(lon - 300 * px, lat + 300 * px, px, px)) as dst:
+        dst.write(np.full((600, 600), 20.0, dtype=np.float32), 1)
+
+    out = tmp_path / "out"
+    r = subprocess.run([sys.executable, str(_REPO_ROOT / "scripts" / "flood_extent_export.py"), str(photo),
+                        "--mask", str(tmp_path / "mask.png"), "--dem", str(tmp_path / "dem.tif"),
+                        "--lat", str(lat), "--lon", str(lon), "--heading", "0", "--pitch", "-30",
+                        "--roll", "0", "--height-above-ground", "3", "--calib", str(tmp_path / "none.json"),
+                        "--method", "ortho", "--out-dir", str(out)],
+                       capture_output=True, text=True, cwd=tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    gj = json.loads((out / "flood_extent.geojson").read_text())
+    polys = [f["geometry"] for f in gj["features"]]
+    assert len(polys) == 2
+    assert any(len(p["coordinates"]) == 2 for p in polys)     # the hole is an inner ring
+    with rasterio.open(out / "flood_ortho.tif") as src:
+        assert src.crs.to_epsg() == 4326 and src.nodata == 0
+        classes = src.read(1)
+    assert {0, 1, 2} <= set(np.unique(classes).tolist())
+    assert gj["features"][0]["properties"]["water_area_m2"] > 0

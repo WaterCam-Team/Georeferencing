@@ -119,6 +119,6 @@ def test_intersect_flat_rejects_beyond_max_range():
 
 
 def test_guard_logs_rejection(caplog):
-    with caplog.at_level("INFO", logger="geo_core"):
+    with caplog.at_level("INFO", logger="ufonet_geo.geometry"):
         intersect_flat(_ray_at_depression(0.5), 5.0)
     assert "Ray rejected" in caplog.text
