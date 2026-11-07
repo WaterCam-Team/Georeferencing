@@ -165,3 +165,46 @@ def test_residuals_are_in_metres_not_degrees():
     # A 0.00008 deg (~8.9 m) error on one of 6 points must show as metres
     r = _refine(_synthetic_gcps(6, bad_index=3))
     assert 1.0 < max(r.residuals_m) < 20.0
+
+
+# ── roll near zero, and a fit with the camera position held ─────────────────
+
+def test_rotation_responds_to_tiny_roll():
+    """Roll must change R even for tiny values, or a solver starting at 0 is stuck."""
+    R0 = build_rotation_matrix(30.0, -45.0, 0.0)
+    R1 = build_rotation_matrix(30.0, -45.0, 1e-8)
+    assert np.abs(R1 - R0).max() > 0
+
+
+def _scene_gcps(heading, pitch, roll, height, pixels):
+    R = build_rotation_matrix(heading, pitch, roll)
+    out = []
+    for i, (u, v) in enumerate(pixels):
+        lat, lon = pixel_to_world_flat(u, v, _K, R, _LAT, _LON, height)
+        out.append(GroundControlPoint(f"P{i}", u, v, lat, lon, None))
+    return out
+
+
+def test_refine_recovers_roll_from_zero_start():
+    gcps = _scene_gcps(30.0, -45.0, 2.0, _H, _PIXELS)
+    r = refine_pose_with_diagnostics(_K, gcps, _LAT, _LON, _H, 31.0, -44.0, 0.0,
+                                     leave_one_out=False)
+    assert r.ok
+    assert abs(r.roll_deg - 2.0) < 0.05
+
+
+def test_fix_position_holds_camera_and_recovers_angles():
+    """Low camera, near-flat ground close by: hold the surveyed position, solve angles."""
+    pixels = [(200, 1000), (960, 1050), (1700, 1000), (400, 760), (1500, 760),
+              (960, 700), (700, 860), (1250, 880)]
+    gcps = _scene_gcps(72.0, -18.0, 1.5, 1.4, pixels)
+    r = refine_pose_with_diagnostics(_K, gcps, _LAT, _LON, 1.4, 60.0, -12.0, 0.0,
+                                     leave_one_out=True, fix_position=True,
+                                     fix_height=True)
+    assert r.ok
+    assert (r.cam_lat, r.cam_lon, r.height_m) == (_LAT, _LON, 1.4)
+    assert abs(r.heading_deg - 72.0) < 0.05
+    assert abs(r.pitch_deg + 18.0) < 0.05
+    assert abs(r.roll_deg - 1.5) < 0.05
+    assert r.rms_m < 0.01
+    assert len(r.leave_one_out) == len(gcps)
