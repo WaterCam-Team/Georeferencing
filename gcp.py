@@ -151,15 +151,28 @@ def _ground_point_enu(g, K, R, proj, cam_e, cam_n, height_m):
     return cam_e + off[0], cam_n + off[1]
 
 
-def _solve(K, gcps, x0, proj, bounds):
-    """Robust least squares on ground-distance residuals in METRES."""
+def _solve(K, gcps, x0, proj, bounds, free=None):
+    """
+    Robust least squares on ground-distance residuals in METRES.
+
+    x is (lon, lat, height, heading, pitch, roll). free is a boolean mask over x:
+    only those entries are solved and the rest stay at x0 (default: all free).
+    Returns the scipy result with .x expanded back to all six values.
+    """
     from scipy.optimize import least_squares
     from camera_geometry import build_rotation_matrix
 
     targets = [proj(g.lon, g.lat) for g in gcps]
+    x0 = np.asarray(x0, dtype=np.float64)
+    free = np.ones(6, dtype=bool) if free is None else np.asarray(free, dtype=bool)
 
-    def residual(x: np.ndarray) -> np.ndarray:
-        cam_lon, cam_lat, height_m, heading_deg, pitch_deg, roll_deg = x
+    def full(xf: np.ndarray) -> np.ndarray:
+        x = x0.copy()
+        x[free] = xf
+        return x
+
+    def residual(xf: np.ndarray) -> np.ndarray:
+        cam_lon, cam_lat, height_m, heading_deg, pitch_deg, roll_deg = full(xf)
         R = build_rotation_matrix(heading_deg, pitch_deg, roll_deg)
         cam_e, cam_n = proj(cam_lon, cam_lat)
         out = []
@@ -172,12 +185,17 @@ def _solve(K, gcps, x0, proj, bounds):
         return np.array(out, dtype=np.float64)
 
     kw = dict(loss="soft_l1", f_scale=GCP_F_SCALE_M, max_nfev=500)
+    xf0 = x0[free]
     if bounds:
         # position +-~0.002 deg (~200 m); height 0.1-200 m; pitch [-90,0]; heading/roll wide
-        lb = [x0[0] - 0.002, x0[1] - 0.002, 0.1, -360, -90, -180]
-        ub = [x0[0] + 0.002, x0[1] + 0.002, 200, 360, 0, 180]
-        return least_squares(residual, x0, bounds=(lb, ub), **kw)
-    return least_squares(residual, x0, **kw)
+        lb = np.array([x0[0] - 0.002, x0[1] - 0.002, 0.1, -360, -90, -180])[free]
+        ub = np.array([x0[0] + 0.002, x0[1] + 0.002, 200, 360, 0, 180])[free]
+        xf0 = np.clip(xf0, lb, ub)
+        res = least_squares(residual, xf0, bounds=(lb, ub), **kw)
+    else:
+        res = least_squares(residual, xf0, **kw)
+    res.x = full(res.x)
+    return res
 
 
 def _per_point_m(K, gcps, x, proj):
@@ -247,9 +265,17 @@ def refine_pose_with_diagnostics(
     *,
     bounds: bool = True,
     leave_one_out: bool = True,
+    fix_position: bool = False,
+    fix_height: bool = False,
 ) -> PoseRefinement:
     """
     Refine camera pose (lat, lon, height, heading, pitch, roll) from GCPs.
+
+    fix_position holds the camera at (cam_lat_0, cam_lon_0) and fix_height at
+    height_0; only the other values are solved. Use them when the camera point was
+    surveyed (RTK): with all six free and GCPs on near-flat ground close to the
+    camera, a small camera shift and a wrong heading/pitch can fit almost equally
+    well, so the free fit can settle a few degrees off.
 
     Minimises ground-distance residuals in METRES (east/north difference
     between each projected GCP pixel and its surveyed position, in a local
@@ -279,7 +305,9 @@ def refine_pose_with_diagnostics(
     proj = Proj(proj="aeqd", lat_0=cam_lat_0, lon_0=cam_lon_0, datum="WGS84")
     x0 = np.array([cam_lon_0, cam_lat_0, height_0, heading_0, pitch_0, roll_0],
                   dtype=np.float64)
-    res = _solve(K, gcps, x0, proj, bounds)
+    free = np.array([not fix_position, not fix_position, not fix_height,
+                     True, True, True])
+    res = _solve(K, gcps, x0, proj, bounds, free)
     if not res.success:
         return fail
 
@@ -301,7 +329,7 @@ def refine_pose_with_diagnostics(
         full = _grounds(x)
         for i, g in enumerate(gcps):
             rest = gcps[:i] + gcps[i + 1:]
-            r = _solve(K, rest, x, proj, bounds)
+            r = _solve(K, rest, x, proj, bounds, free)
             if not r.success:
                 continue
             pts = _grounds(r.x)
