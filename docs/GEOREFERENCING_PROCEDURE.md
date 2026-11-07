@@ -155,6 +155,40 @@ GCPs are **known geographic positions** (and optionally elevation) that you can 
 
 **Validation only (no refinement):** Click each GCP in the image and compare the **predicted** (lat, lon) to known coordinates. Large residuals indicate camera height, heading/pitch bias, or vertical datum issues; use pose refinement (R) or adjust and re-run.
 
+### 4.3a Surveyed pose from RTK and ArUco targets (`scripts/survey_to_pose.py`)
+
+For a site visit with an RTK receiver:
+
+1. Lay ArUco targets (`DICT_4X4_50`) across the camera's view: at least 6, spread
+   left to right and near to far, on open ground.
+2. Take a photo with the node itself, so its calibration applies.
+3. Survey each target as `M<id>` (marker 7 is `M7`) and the camera as `CAM`. Tape the
+   camera's height above the ground below it.
+4. Run the script with the node's calibration, the photo, the RTK export, the taped
+   height and a rough heading (IMU or compass; it can be far off):
+
+   ```bash
+   python3 scripts/survey_to_pose.py --photo private/<visit>/photo.jpg \
+       --calibration private/calibrations/<unit>.json --rtk private/<visit>/rtk.csv \
+       --unit-id <unit> --mount-height <m> --heading <deg> --out-dir private/<visit>/
+   ```
+
+The camera is held at its RTK point, and heading, pitch and roll are solved from the
+targets (`--fit-height` solves the height too). Several starting headings are tried.
+A free six-parameter fit can trade a small camera shift for wrong angles when the
+targets are on near-flat ground close to the camera, so a surveyed position isn't
+refitted. It uses `gcp.refine_pose_with_diagnostics` with `fix_position` (and
+`fix_height` unless `--fit-height`); the same options are there for other surveyed
+cameras.
+
+The script writes the GCP CSV, a surveyed unit config, the API pose config
+(`PUT /devices/{id}/pose-config`) and a report:
+- the residual per target;
+- a leave-one-out error per target, with suspects flagged by the library's
+  misfit and leverage check (`gcp._flag_leave_one_out`).
+
+It writes only under `private/` (git-ignored). Site data stays local.
+
 ### 4.4 Heading sources, ray limits, and DEM use
 
 **Heading sources** (`UnitConfig.resolve_heading`), in order: `--heading` > `heading_deg` in the unit config (surveyed; preferred) > EXIF yaw (IMU) with the per-unit mount/declination/residual corrections. There is no other fallback: GPS track (course over ground) is meaningless for a fixed camera and is **not** used, and there is no silent default of 0 deg. With no usable source the tools stop with `HeadingUnavailableError` and a message telling you to set `heading_deg` or pass `--heading`.
