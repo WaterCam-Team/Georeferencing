@@ -39,7 +39,8 @@ def _scene(heading=72.0, pitch=-18.0, roll=1.5, height=1.4, lat0=0.5, lon0=10.5)
     return K, targets, (heading, pitch, roll, height, lat0, lon0)
 
 
-def test_recovers_pose_and_writes_outputs(tmp_path, monkeypatch):
+@pytest.mark.parametrize("heading_off", [8, 150, -170])
+def test_recovers_pose_and_writes_outputs(tmp_path, monkeypatch, heading_off):
     stp = _load_script()
     K, targets, (heading, pitch, roll, height, lat0, lon0) = _scene()
 
@@ -70,7 +71,7 @@ def test_recovers_pose_and_writes_outputs(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", [
         "survey_to_pose.py", "--photo", str(photo), "--calibration", str(calib), "--rtk", str(rtk),
         "--unit-id", "UFOTEST", "--out-dir", str(out), "--mount-height", str(height),
-        "--heading", str(heading + 8), "--pitch", str(pitch + 4), "--roll", "0"])
+        "--heading", str(heading + heading_off), "--pitch", str(pitch + 4), "--roll", "0"])
     assert stp.main() == 0
 
     pc = json.load(open(next(out.glob("pose_config_UFOTEST_*.json"))))
@@ -83,6 +84,7 @@ def test_recovers_pose_and_writes_outputs(tmp_path, monkeypatch):
     assert uc["camera_lat"] == lat0 and uc["camera_alt_ellipsoid_m"] == 101.4
     rep = json.load(open(next(out.glob("survey_report_UFOTEST_*.json"))))
     assert rep["rms_m"] < 0.05
+    assert rep["flagged"] == [] and len(rep["leave_one_out_m"]) == len(targets)
     assert rep["unmatched"] == ["M33"] and rep["surveyed_not_seen"] == ["M40"]
     with open(next(out.glob("gcps_UFOTEST_*.csv"))) as f:
         assert len(list(csv.DictReader(f))) == len(targets)

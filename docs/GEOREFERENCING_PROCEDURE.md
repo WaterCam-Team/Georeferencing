@@ -177,12 +177,15 @@ The camera is held at its RTK point, and heading, pitch and roll are solved from
 targets (`--fit-height` solves the height too). Several starting headings are tried.
 A free six-parameter fit can trade a small camera shift for wrong angles when the
 targets are on near-flat ground close to the camera, so a surveyed position isn't
-refitted.
+refitted. It uses `gcp.refine_pose_with_diagnostics` with `fix_position` (and
+`fix_height` unless `--fit-height`); the same options are there for other surveyed
+cameras.
 
 The script writes the GCP CSV, a surveyed unit config, the API pose config
 (`PUT /devices/{id}/pose-config`) and a report:
 - the residual per target;
-- a leave-one-out error per target, with suspects flagged.
+- a leave-one-out error per target, with suspects flagged by the library's
+  misfit and leverage check (`gcp._flag_leave_one_out`).
 
 It writes only under `private/` (git-ignored). Site data stays local.
 

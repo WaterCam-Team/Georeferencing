@@ -8,12 +8,13 @@ RTK, then run this. It
 1. finds the targets in the photo (aruco_gcp.detect_in_photo, undistorted frame);
 2. matches them to the RTK points by label (marker id N <-> RTK point "<prefix>N");
 3. writes the GCP CSV (gcp.save_gcps format);
-4. solves heading, pitch and roll (>= 4 GCPs) with the camera held at its RTK point
-   and the taped mount height (--fit-height solves the height too). It tries several
-   starting headings, since an IMU/compass guess can be far off, and keeps the best.
-   A free 6-parameter fit (gcp.refine_pose_with_diagnostics) can trade a small camera
-   shift for wrong angles when the targets lie on near-flat ground close to the
-   camera, so the surveyed position is not refitted;
+4. solves heading, pitch and roll (>= 4 GCPs) with gcp.refine_pose_with_diagnostics,
+   the camera held at its RTK point (fix_position) and at the taped mount height
+   (--fit-height solves the height too). A free 6-parameter fit can trade a small
+   camera shift for wrong angles when the targets lie on near-flat ground close to
+   the camera, so the surveyed position is not refitted. It tries several starting
+   headings, since an IMU/compass guess can be far off, keeps the best, and flags
+   suspect GCPs with the library's leave-one-out check;
 5. writes a unit config (unit_config.example.json layout) and the API pose config
    (PUT /devices/{id}/pose-config), and prints the residuals and leave-one-out flags.
 
@@ -37,7 +38,6 @@ default; say which in --height-datum).
 import argparse
 import csv
 import json
-import math
 import os
 import sys
 from datetime import date
@@ -74,73 +74,27 @@ def load_calibration(path):
 
 
 def solve_angles(K, gcps, cam_lat, cam_lon, height, heading0, pitch0, roll0, fit_height=False):
-    """Heading/pitch/roll (and optionally height) with the camera fixed at (cam_lat, cam_lon).
+    """Heading, pitch and roll (and the height with fit_height), the camera held at its RTK point.
 
-    Ground-distance residuals in metres (gcp's flat-ground model), soft-L1 loss, several
-    starting headings. Returns (x, per-GCP residuals in m, rms in m), x = [heading, pitch,
-    roll, height]."""
-    import numpy as np
-    from pyproj import Proj
-    from scipy.optimize import least_squares
-    from camera_geometry import build_rotation_matrix
-    from gcp import _ground_point_enu, GCP_F_SCALE_M, MISS_RESIDUAL_M
+    gcp.refine_pose_with_diagnostics with fix_position (and fix_height unless fit_height),
+    from several starting headings since an IMU or compass guess can be far off. Keeps the
+    lowest ground RMS and reruns it with the leave-one-out check. Returns the PoseRefinement.
+    """
+    from gcp import refine_pose_with_diagnostics
 
-    proj = Proj(proj="aeqd", lat_0=cam_lat, lon_0=cam_lon, datum="WGS84")
-    targets = [proj(g.lon, g.lat) for g in gcps]
+    def fit(hd, loo):
+        return refine_pose_with_diagnostics(
+            K, gcps, cam_lat, cam_lon, height, ((hd + 180.0) % 360.0) - 180.0, pitch0, roll0,
+            fix_position=True, fix_height=not fit_height, leave_one_out=loo)
 
-    def per_point(x):
-        hd, pt, rl, h = x
-        R = build_rotation_matrix(hd, pt, rl)
-        out = []
-        for g, (te, tn) in zip(gcps, targets):
-            pred = _ground_point_enu(g, K, R, proj, 0.0, 0.0, h)
-            out.append(None if pred is None else (pred[0] - te, pred[1] - tn))
-        return out
-
-    def residual(v):
-        x = list(v) + [height] if not fit_height else list(v)
-        res = []
-        for d in per_point(x):
-            res += [MISS_RESIDUAL_M, MISS_RESIDUAL_M] if d is None else [d[0], d[1]]
-        return np.array(res)
-
-    # camera_geometry.build_rotation_matrix skips roll below 1e-6 deg, so at exactly
-    # roll 0 the solver sees no change in roll and never moves it: never start there.
-    roll_start = roll0 if abs(roll0) > 0.05 else 0.5
     best = None
     for dh in (0, -30, 30, -60, 60, -90, 90, 180):
-        v0 = [heading0 + dh, pitch0, roll_start] + ([height] if fit_height else [])
-        lb = [-720, -90, -180] + ([0.1] if fit_height else [])
-        ub = [720, 0, 180] + ([200] if fit_height else [])
-        r = least_squares(residual, v0, bounds=(lb, ub), loss="soft_l1", f_scale=GCP_F_SCALE_M,
-                          max_nfev=2000, x_scale=[10, 10, 10] + ([1] if fit_height else []))
-        x = list(r.x) + ([height] if not fit_height else [])
-        d = per_point(x)
-        per = [float("nan") if e is None else float(np.hypot(*e)) for e in d]
-        rms = float(np.sqrt(np.nanmean(np.square(per)))) if per else float("nan")
-        if best is None or rms < best[2]:
-            best = (x, per, rms)
-    x = best[0]
-    x[0] = x[0] % 360.0          # heading in [0, 360)
-    return x, best[1], best[2]
-
-
-def leave_one_out(K, gcps, cam_lat, cam_lon, height, x, fit_height):
-    """Each GCP's error when the angles are solved without it (m)."""
-    import math as _m
-    out = {}
-    for i, g in enumerate(gcps):
-        rest = gcps[:i] + gcps[i + 1:]
-        xr, _, _ = solve_angles(K, rest, cam_lat, cam_lon, height, x[0], x[1], x[2], fit_height)
-        # error of g under the reduced solution
-        from pyproj import Proj
-        from camera_geometry import build_rotation_matrix
-        from gcp import _ground_point_enu
-        proj = Proj(proj="aeqd", lat_0=cam_lat, lon_0=cam_lon, datum="WGS84")
-        pred = _ground_point_enu(g, K, build_rotation_matrix(xr[0], xr[1], xr[2]), proj, 0.0, 0.0, xr[3])
-        te, tn = proj(g.lon, g.lat)
-        out[g.label] = float("nan") if pred is None else _m.hypot(pred[0] - te, pred[1] - tn)
-    return out
+        r = fit(heading0 + dh, False)
+        if r.ok and (best is None or r.rms_m < best[1].rms_m):
+            best = (heading0 + dh, r)
+    if best is None:
+        raise SystemExit("pose solve failed from every starting heading: check the GCPs")
+    return fit(best[1].heading_deg, True)
 
 
 def inside_private(path):
@@ -224,12 +178,12 @@ def main():
     if len(gcps) < 4:
         raise SystemExit("need at least 4 matched GCPs to solve the pose")
 
-    x, per, rms = solve_angles(K_undist, gcps, cam_lat, cam_lon, a.mount_height,
-                               a.heading, a.pitch, a.roll, a.fit_height)
-    heading, pitch, roll, height = x
-    loo = leave_one_out(K_undist, gcps, cam_lat, cam_lon, height, x, a.fit_height)
-    # A GCP is suspect when its left-out error is far above the rest's fit
-    flagged = [l for l, e in loo.items() if e == e and e > max(0.5, 5 * rms)]
+    ref = solve_angles(K_undist, gcps, cam_lat, cam_lon, a.mount_height,
+                       a.heading, a.pitch, a.roll, a.fit_height)
+    heading, pitch, roll, height = ref.heading_deg % 360.0, ref.pitch_deg, ref.roll_deg, ref.height_m
+    per, rms = ref.residuals_m, ref.rms_m
+    loo = {l.label: l.heldout_error_m for l in ref.leave_one_out}
+    flagged = [l.label for l in ref.leave_one_out if l.flagged]
     print("solved pose (camera fixed at the RTK point):")
     print(f"  heading {heading:.2f} deg, pitch {pitch:.2f} deg, roll {roll:.2f} deg, "
           f"height {height:.2f} m ({'solved' if a.fit_height else 'taped'})")
