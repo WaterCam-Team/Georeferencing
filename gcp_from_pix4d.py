@@ -39,7 +39,7 @@ import cv2
 import numpy as np
 from pyproj import Transformer
 
-from aruco_gcp import read_pix4d_frame
+from aruco_gcp import read_pix4d_depth, read_pix4d_frame
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -258,12 +258,9 @@ class FrameViewer:
             print(f"[ERROR] Cannot read {img_path}")
             return False
 
-        try:
-            import tifffile
-            self.depth = tifffile.imread(str(depth_path)).astype(np.float32)
-        except Exception as e:
-            print(f"[WARN] Depth map unavailable ({e})")
-            self.depth = None
+        self.depth = read_pix4d_depth(depth_path)
+        if self.depth is None:
+            print(f"[WARN] Depth map unavailable ({depth_path})")
 
         self.cur_cap = self.name_to_cap.get(name)
         if self.cur_cap is None:

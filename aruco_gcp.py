@@ -130,6 +130,17 @@ def read_pix4d_frame(path) -> Optional[np.ndarray]:
     return cv2.imread(str(path), cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
 
 
+def read_pix4d_depth(path) -> Optional[np.ndarray]:
+    """
+    Read a Pix4DCatch depth map (single-channel float32 TIFF, metres) or None.
+    OpenCV reads these directly, so no extra TIFF library is needed.
+    """
+    d = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if d is None or d.ndim != 2:
+        return None
+    return d.astype(np.float32)
+
+
 def _rotation_opf(omega_deg: float, phi_deg: float, kappa_deg: float) -> np.ndarray:
     """
     OPF camera→world rotation: R = Rx(ω) @ Ry(φ) @ Rz(κ).
@@ -256,6 +267,7 @@ def locate_in_pix4d(
     print(f"[aruco_gcp] {n_frames} frames, sampling every {every_n_frames} → "
           f"~{n_frames // every_n_frames} frames to check")
 
+    n_depth_read = n_depth_failed = 0
     for frame_idx in range(0, n_frames, every_n_frames):
         cap = captures_inp[frame_idx]
         frame_num = frame_idx + 1                   # files are 1-indexed
@@ -274,11 +286,11 @@ def locate_in_pix4d(
             continue
 
         # ── Depth map ─────────────────────────────────────────────────────────
-        try:
-            import tifffile
-            depth = tifffile.imread(str(depth_path)).astype(np.float32)
-        except Exception:
+        depth = read_pix4d_depth(depth_path)
+        if depth is None:
+            n_depth_failed += 1
             continue
+        n_depth_read += 1
         d_h, d_w = depth.shape[:2]
 
         # ── Camera pose ───────────────────────────────────────────────────────
@@ -317,6 +329,13 @@ def locate_in_pix4d(
 
             mid_int = int(mid)
             observations.setdefault(mid_int, []).append(world_enu)
+
+    if n_depth_failed:
+        print(f"[aruco_gcp] WARNING: {n_depth_failed} of {n_depth_failed + n_depth_read} depth maps "
+              "next to frames with markers could not be read; those views were skipped")
+        if not n_depth_read:
+            raise RuntimeError("No Pix4DCatch depth map could be read, so no marker can be located "
+                               f"(e.g. {depth_path})")
 
     # ── Average observations per marker ──────────────────────────────────────
     result: dict[int, dict] = {}
