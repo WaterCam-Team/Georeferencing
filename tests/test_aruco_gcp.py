@@ -59,7 +59,7 @@ def _make_session(tmp_path: Path, geoid_sep: float | None) -> Path:
     }
     (opf / "projected_input_cameras.json").write_text(json.dumps(projected))
 
-    # Frame files must exist; their contents come from the cv2/tifffile mocks.
+    # Frame files must exist; their contents come from the frame/depth reader mocks.
     (images / "Image_000001.jpg").touch()
     (images / "DepthMap_000001.tiff").touch()
 
@@ -95,7 +95,7 @@ class TestLocateInPix4dGeoidCorrection:
 
     def _run_locate(self, session_dir: Path, depth_m: float = 3.0):
         """
-        Patch the expensive parts (cv2, tifffile, ArUco detector) and run
+        Patch the expensive parts (frame and depth reads, ArUco detector) and run
         locate_in_pix4d against a single synthetic frame with one marker at
         the image centre.
         """
@@ -113,15 +113,11 @@ class TestLocateInPix4dGeoidCorrection:
 
         fake_color = np.zeros((192, 256, 3), dtype=np.uint8)
 
-        # locate_in_pix4d imports tifffile inside the function, so the mock goes
-        # in sys.modules rather than on the aruco_gcp module.
-        mock_tifffile = MagicMock()
-        mock_tifffile.imread.return_value = fake_depth
 
         with (
             patch("aruco_gcp._make_detector", return_value=fake_detector),
             patch("aruco_gcp.cv2.imread", return_value=fake_color),
-            patch.dict(sys.modules, {"tifffile": mock_tifffile}),
+            patch("aruco_gcp.read_pix4d_depth", return_value=fake_depth),
         ):
             result = aruco_gcp.locate_in_pix4d(
                 str(session_dir),
