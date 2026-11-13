@@ -39,6 +39,8 @@ import cv2
 import numpy as np
 from pyproj import Transformer
 
+from aruco_gcp import read_pix4d_frame
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OPF parsing helpers  (shared with aruco_gcp.py)
@@ -250,7 +252,8 @@ class FrameViewer:
         depth_name = name.replace("Image_", "DepthMap_").replace(".jpg", ".tiff")
         depth_path = self.session_dir / "images" / depth_name
 
-        img = cv2.imread(str(img_path))
+        # Stored orientation (frames show sideways): clicks must match the depth map.
+        img = read_pix4d_frame(img_path)
         if img is None:
             print(f"[ERROR] Cannot read {img_path}")
             return False
