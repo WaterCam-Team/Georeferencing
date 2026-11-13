@@ -212,3 +212,33 @@ def test_sample_dem_grid_bilinear_follows_a_slope(tmp_path):
     assert steps.mean() == pytest.approx(0.3 * 0.25, rel=0.05)
     zn = sample_dem_grid(str(path), lat, lon, method="nearest")
     assert np.abs(np.diff(zn)).max() == pytest.approx(0.3, abs=1e-4)
+
+
+# A strong-barrel OV5647-like lens (k1 -0.44): r_d peaks near r 1.23 and then falls.
+D_STRONG = np.array([-0.44, 0.264, -0.0007, 0.00014, -0.083])
+K_STRONG = np.array([[2945.0, 0, 1271.0], [0, 2945.0, 933.0], [0, 0, 1]])
+
+
+def test_monotonic_radius():
+    r = g.monotonic_radius(D_STRONG)
+    assert 1.1 < r < 1.4
+    assert g.monotonic_radius(None) == float("inf")
+    assert g.monotonic_radius([0.0, 0.0, 0.0, 0.0, 0.0]) == float("inf")
+
+
+def test_far_off_axis_points_do_not_fold_into_the_frame():
+    """Past the turning radius the raw polynomial brings points back inside a 2592x1944 frame."""
+    r = np.linspace(1.3, 2.0, 701)
+    xd, _ = g.distort_normalized(r, 0.0, D_STRONG)
+    folded = r[(K_STRONG[0, 0] * xd + K_STRONG[0, 2] >= 0) & (K_STRONG[0, 0] * xd + K_STRONG[0, 2] < 2592)]
+    assert folded.size, "the lens model should fold some far points into the frame"
+    pts = np.c_[folded, np.zeros_like(folded), np.ones_like(folded)]
+    u, v = g.project_to_pixels(pts, K_STRONG, D_STRONG)
+    assert np.all(np.isnan(u)) and np.all(np.isnan(v))
+
+
+def test_points_inside_the_valid_radius_are_unchanged():
+    pts = np.array([[0.1, -0.2, 1.0], [0.55, 0.3, 1.0], [-0.6, 0.4, 1.0], [1.0, 0.0, 1.0]])
+    u, v = g.project_to_pixels(pts, K_STRONG, D_STRONG)
+    ref, _ = cv2.projectPoints(pts, np.zeros(3), np.zeros(3), K_STRONG, D_STRONG)
+    np.testing.assert_allclose(np.c_[u, v], ref.reshape(-1, 2), atol=1e-6)
