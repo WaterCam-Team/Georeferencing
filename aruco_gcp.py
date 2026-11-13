@@ -22,6 +22,14 @@ OPF rotation convention (verified against Pix4DCatch data)
 R = Rx(omega) @ Ry(phi) @ Rz(kappa)   camera → projected-world (ENU)
 Camera frame: X=right, Y=up, Z=backward (OpenGL).
 Forward ray: d_world = R @ [x/d, -y/d, -1] * depth   (pixel → ENU offset).
+
+Frame orientation
+-----------------
+Pix4DCatch stores each frame as a 1920x1440 landscape JPEG with EXIF orientation
+6 (display rotated 90°). The depth maps, the OPF intrinsics and the pose all
+refer to the stored landscape pixels, so frames must be read without applying
+that rotation (read_pix4d_frame). A rotated read puts every pixel at the wrong
+place in the depth map and the camera ray.
 """
 
 from __future__ import annotations
@@ -112,6 +120,15 @@ def detect_in_photo(
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Locate markers in Pix4DCatch session
 # ─────────────────────────────────────────────────────────────────────────────
+
+def read_pix4d_frame(path) -> Optional[np.ndarray]:
+    """
+    Read a Pix4DCatch frame in its stored (sensor) orientation, ignoring the EXIF
+    orientation tag, so pixel (u, v) matches the depth map, intrinsics and pose.
+    cv2.imread applies the tag by default and returns a rotated portrait image.
+    """
+    return cv2.imread(str(path), cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+
 
 def _rotation_opf(omega_deg: float, phi_deg: float, kappa_deg: float) -> np.ndarray:
     """
@@ -249,7 +266,7 @@ def locate_in_pix4d(
             continue
 
         # ── Colour image → ArUco detection ───────────────────────────────────
-        color = cv2.imread(str(img_path))
+        color = read_pix4d_frame(img_path)
         if color is None:
             continue
         corners, ids, _ = detector.detectMarkers(color)
