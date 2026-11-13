@@ -16,7 +16,16 @@ RTK, then run this. It
    headings, since an IMU/compass guess can be far off, keeps the best, and flags
    suspect GCPs with the library's leave-one-out check;
 5. writes a unit config (unit_config.example.json layout) and the API pose config
-   (PUT /devices/{id}/pose-config), and prints the residuals and leave-one-out flags.
+   (PUT /devices/{id}/pose-config), and prints the residuals and leave-one-out flags;
+6. writes an API survey import (survey_manifest_<unit>_<date>.json + the photo as
+   reference.jpg) for the API's scripts/import_survey.py: an open survey from
+   --valid-from (default now) with the lens calibration, the solved pose as its base
+   pose, the method and an accuracy line from the residuals and held-out errors, and
+   the node's IMU orientation (median over the photo and any --imu-photos) that later
+   captures' tilt is measured against. On site:
+
+       python scripts/import_survey.py <out-dir>/survey_manifest_<unit>_<date>.json \
+           --api http://<server>:8000 --email <admin> --close-previous
 
 Site data stays local: point --out-dir inside private/ (git-ignored). The script
 refuses to write elsewhere unless --allow-outside-private is given.
@@ -25,7 +34,8 @@ refuses to write elsewhere unless --allow-outside-private is given.
         --photo private/survey-006-2026-11/capture.jpg \\
         --calibration private/calibrations/<unit>.json \\
         --rtk private/survey-006-2026-11/rtk_export.csv \\
-        --unit-id UFO006 --mount-height 1.20 --heading 70 --pitch -15 \\
+        --unit-id UFO006 --device-id watercam-006 --mount-height 1.20 --heading 70 \\
+        --pitch -15 --imu-photos private/survey-006-2026-11/imu/*.jpg \\
         --out-dir private/survey-006-2026-11/
 
 RTK CSV: one row per point, with a name column and lat/lon/height columns. Column
@@ -97,6 +107,65 @@ def solve_angles(K, gcps, cam_lat, cam_lon, height, heading0, pitch0, roll0, fit
     return fit(best[1].heading_deg, True)
 
 
+def imu_median(paths):
+    """The node's IMU orientation over several of its photos (EXIF UserComment): the median
+    gravity vector and roll/pitch, leaving out garbled readings (gravity far from 9.81) and
+    a not-yet-started IMU (roll and pitch both 0). None if no photo has a usable reading."""
+    import numpy as np
+    from exif_imu import read_gps_imu_from_exif
+    grav, rp = [], []
+    for path in paths:
+        try:
+            e = read_gps_imu_from_exif(path)
+        except Exception:
+            continue
+        g = e.get("gravity")
+        if g and abs(float(np.linalg.norm(g)) - 9.81) <= 0.8:
+            grav.append([float(v) for v in g])
+        r, p = e.get("roll_deg"), e.get("pitch_deg")
+        if r is not None and p is not None and not (r == 0 and p == 0):
+            rp.append([float(r), float(p)])
+    if not grav and not rp:
+        return None
+    out = {"source": f"median of {max(len(grav), len(rp))} survey photo(s), EXIF"}
+    if grav:
+        out["gravity"] = [round(float(v), 4) for v in np.median(grav, axis=0)]
+    if rp:
+        out["roll_deg"], out["pitch_deg"] = (round(float(v), 3) for v in np.median(rp, axis=0))
+    return out
+
+
+def survey_manifest(a, calib, img_size, pose_config, height, cam_h, gcps, rms, loo, flagged, imu, stamp):
+    """The API survey import (scripts/import_survey.py in the API repo) for this survey."""
+    import statistics
+    from datetime import datetime
+    base_pose = dict(pose_config)
+    if cam_h is not None and a.height_datum.lower() in ("orthometric", "navd88"):
+        base_pose["camera_alt_m"] = cam_h          # the 3D viewer's datum is orthometric
+    errs = list(loo.values())
+    accuracy = (f"Pose: ground residual RMS {rms:.2f} m over {len(gcps)} RTK-surveyed targets; "
+                f"held-out (leave-one-out) error median {statistics.median(errs):.2f} m, "
+                f"max {max(errs):.2f} m" + (f"; flagged: {', '.join(flagged)}" if flagged else "")
+                + ". Position: the RTK camera point.") if errs else f"Pose: ground residual RMS {rms:.2f} m."
+    method = (f"Site survey {stamp}: RTK points for the camera ({a.camera_point}) and {len(gcps)} ArUco "
+              f"targets in the node's own photo; heading, pitch and roll solved from the targets with the "
+              f"camera held at its RTK point, mount height {'solved' if a.fit_height else 'taped'} "
+              f"({height:.2f} m). RTK heights: {a.height_datum}. scripts/survey_to_pose.py.")
+    survey = {
+        "name": a.survey_name or f"{a.unit_id} site survey {stamp}",
+        "valid_from": a.valid_from or datetime.now().astimezone().isoformat(timespec="seconds"),
+        "valid_to": None,
+        "camera_calibration": {"K": calib.get("K") or calib.get("camera_matrix"),
+                               "D": calib.get("D") or calib.get("dist_coeffs"), "img_size": img_size},
+        "base_pose": base_pose,
+        "method": method,
+        "accuracy": accuracy,
+    }
+    if imu:
+        survey["imu_orientation"] = imu
+    return {"device_id": a.device_id, "survey": survey, "reference_photo": "reference.jpg", "water_maps": []}
+
+
 def inside_private(path):
     p = os.path.realpath(path)
     priv = os.path.realpath(os.path.join(ROOT, "private"))
@@ -110,6 +179,12 @@ def main():
     ap.add_argument("--calibration", required=True, help="the unit's camera calibration JSON (K, D)")
     ap.add_argument("--rtk", required=True, help="RTK export CSV")
     ap.add_argument("--unit-id", required=True)
+    ap.add_argument("--device-id", required=True, help="the unit's device id in the API (for the survey import)")
+    ap.add_argument("--survey-name", help="the survey's name in the API (default: '<unit> site survey <date>')")
+    ap.add_argument("--valid-from", help="when the survey starts applying, ISO 8601 with zone (default: now)")
+    ap.add_argument("--imu-photos", nargs="*", default=[],
+                    help="more node photos taken over a few minutes at the survey: their IMU readings' median "
+                         "is the survey's orientation (one reading alone can be off)")
     ap.add_argument("--out-dir", required=True)
     ap.add_argument("--mount-height", type=float, required=True,
                     help="camera height above the ground below it, taped (m)")
@@ -230,9 +305,20 @@ def main():
               "surveyed_not_seen": surveyed_not_seen}
     json.dump(report, open(os.path.join(a.out_dir, f"survey_report_{a.unit_id}_{stamp}.json"), "w"), indent=2)
     print(f"wrote {uc_path}\nwrote {pc_path}")
-    print("\nTo set it in the API (dashboard Georeference page, or):")
-    print(f"  curl -X PUT .../devices/<device_id>/pose-config -H 'Content-Type: application/json' "
-          f"--data @{pc_path}")
+
+    import shutil
+    shutil.copyfile(a.photo, os.path.join(a.out_dir, "reference.jpg"))
+    img_size = calib.get("img_size") or [int(img.shape[1]), int(img.shape[0])]
+    imu = imu_median([a.photo] + list(a.imu_photos))
+    manifest = survey_manifest(a, calib, img_size, pose_config, height, cam_h, gcps, rms, loo, flagged, imu, stamp)
+    mf_path = os.path.join(a.out_dir, f"survey_manifest_{a.unit_id}_{stamp}.json")
+    json.dump(manifest, open(mf_path, "w"), indent=2)
+    print(f"wrote {mf_path} (+ reference.jpg)")
+    if imu is None:
+        print("  no usable IMU reading in the photos: the survey has no orientation to measure tilt against")
+    print("\nTo put it on the server as the unit's open survey (closing the previous one), from the API repo:")
+    print(f"  python scripts/import_survey.py {mf_path} --api http://<server>:8000 --email <admin> "
+          "--close-previous")
     return 0
 
 

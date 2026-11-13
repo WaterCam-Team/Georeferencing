@@ -170,8 +170,19 @@ For a site visit with an RTK receiver:
    ```bash
    python3 scripts/survey_to_pose.py --photo private/<visit>/photo.jpg \
        --calibration private/calibrations/<unit>.json --rtk private/<visit>/rtk.csv \
-       --unit-id <unit> --mount-height <m> --heading <deg> --out-dir private/<visit>/
+       --unit-id <unit> --device-id <API device id> --mount-height <m> --heading <deg> \
+       --imu-photos private/<visit>/imu/*.jpg --out-dir private/<visit>/
    ```
+5. Put the survey on the server, from the API repo (an admin account; it closes the
+   unit's previous open survey at the new one's start):
+
+   ```bash
+   python scripts/import_survey.py private/<visit>/survey_manifest_<unit>_<date>.json \
+       --api http://<server>:8000 --email <admin> --close-previous
+   ```
+
+   Then reset the node's pose-monitor reference (dashboard "Accept current orientation",
+   downlink `19 9A`), so the node and the survey start from the same orientation.
 
 The camera is held at its RTK point, and heading, pitch and roll are solved from the
 targets (`--fit-height` solves the height too). Several starting headings are tried.
@@ -186,6 +197,13 @@ The script writes the GCP CSV, a surveyed unit config, the API pose config
 - the residual per target;
 - a leave-one-out error per target, with suspects flagged by the library's
   misfit and leverage check (`gcp._flag_leave_one_out`).
+
+- an API survey import (`survey_manifest_<unit>_<date>.json` plus the photo as
+  `reference.jpg`): an open survey from `--valid-from` (default now) with the lens
+  calibration, the solved pose as its base pose, the method, an accuracy line from the
+  residuals and held-out errors, and the node's IMU orientation. Later captures' tilt is
+  measured against that orientation, so take a few extra node photos over a few minutes
+  (`--imu-photos`): the median of their readings is used, as one reading can be off.
 
 It writes only under `private/` (git-ignored). Site data stays local.
 
