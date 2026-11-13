@@ -70,7 +70,8 @@ def test_recovers_pose_and_writes_outputs(tmp_path, monkeypatch, heading_off):
     monkeypatch.setattr(stp, "ROOT", str(tmp_path))
     monkeypatch.setattr(sys, "argv", [
         "survey_to_pose.py", "--photo", str(photo), "--calibration", str(calib), "--rtk", str(rtk),
-        "--unit-id", "UFOTEST", "--out-dir", str(out), "--mount-height", str(height),
+        "--unit-id", "UFOTEST", "--device-id", "watercam-test", "--valid-from", "2026-11-20T10:00:00-05:00",
+        "--out-dir", str(out), "--mount-height", str(height),
         "--heading", str(heading + heading_off), "--pitch", str(pitch + 4), "--roll", "0"])
     assert stp.main() == 0
 
@@ -88,14 +89,46 @@ def test_recovers_pose_and_writes_outputs(tmp_path, monkeypatch, heading_off):
     assert rep["unmatched"] == ["M33"] and rep["surveyed_not_seen"] == ["M40"]
     with open(next(out.glob("gcps_UFOTEST_*.csv"))) as f:
         assert len(list(csv.DictReader(f))) == len(targets)
+    # The API survey import: an open survey with the solved pose as its base pose
+    mf = json.load(open(next(out.glob("survey_manifest_UFOTEST_*.json"))))
+    assert mf["device_id"] == "watercam-test" and mf["water_maps"] == []
+    sv = mf["survey"]
+    assert sv["valid_from"] == "2026-11-20T10:00:00-05:00" and sv["valid_to"] is None
+    assert sv["base_pose"] == pc                       # ellipsoidal heights: no camera_alt_m
+    assert sv["camera_calibration"]["img_size"] == [1280, 960]
+    assert "held-out" in sv["accuracy"] and "imu_orientation" not in sv   # the stub photo has no EXIF
+    assert (out / mf["reference_photo"]).read_bytes() == b"not used"
 
 
 def test_refuses_out_dir_outside_private(tmp_path, monkeypatch):
     stp = _load_script()
     monkeypatch.setattr(stp, "ROOT", str(tmp_path))
     monkeypatch.setattr(sys, "argv", [
-        "survey_to_pose.py", "--photo", "x", "--calibration", "x", "--rtk", "x", "--unit-id", "U",
+        "survey_to_pose.py", "--photo", "x", "--calibration", "x", "--rtk", "x", "--unit-id", "U", "--device-id", "d",
         "--out-dir", str(tmp_path / "public"), "--mount-height", "1", "--heading", "0"])
     with pytest.raises(SystemExit) as e:
         stp.main()
     assert "outside private" in str(e.value)
+
+
+def _photo_with_imu(path, words):
+    import piexif
+    from PIL import Image
+    exif = piexif.dump({"Exif": {piexif.ExifIFD.UserComment: b"ASCII\0\0\0" + words.encode()}})
+    Image.new("RGB", (64, 48)).save(path, exif=exif)
+
+
+def test_imu_median_skips_garbled_and_unstarted_readings(tmp_path):
+    stp = _load_script()
+    paths = []
+    for i, words in enumerate(["Roll -4.8 Pitch -33.6 Yaw 227 Gravity 1.68,-4.12,8.73",
+                               "Roll -4.9 Pitch -33.7 Yaw 227 Gravity 1.70,-4.10,8.74",
+                               "Roll -4.8 Pitch -33.6 Yaw 227 Gravity 1.76,-4.28,-319.04",   # garbled
+                               "Roll 0.0 Pitch 0.0 Yaw 0.0"]):                               # not started
+        p = tmp_path / f"p{i}.jpg"
+        _photo_with_imu(p, words)
+        paths.append(str(p))
+    imu = stp.imu_median(paths)
+    assert imu["gravity"] == pytest.approx([1.70, -4.12, 8.73], abs=0.02)
+    assert imu["roll_deg"] == pytest.approx(-4.8) and imu["pitch_deg"] == pytest.approx(-33.6)
+    assert stp.imu_median([paths[3]]) is None
