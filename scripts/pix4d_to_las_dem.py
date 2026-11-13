@@ -7,7 +7,16 @@ Outputs (written to --out-dir, named after the scan timestamp):
   <name>_camera_poses.csv    -- per-frame GPS + yaw/pitch/roll, GCP-ready
 
 Usage:
-  python scripts/pix4d_to_las_dem.py <scan_dir> [--out-dir DIR] [--dem-res M]
+  python scripts/pix4d_to_las_dem.py <scan_dir> [--out-dir DIR] [--dem-res M] [--source depth|cloud]
+
+Point source (--source):
+  depth (default) -- built from the frames' LiDAR depth maps and their OPF poses
+                     (projected_input_cameras.json), the same geometry the frames and
+                     the GCP tools use. Agrees with RTK-surveyed points to a few cm.
+  cloud           -- the point cloud Pix4DCatch stores. Checked against the depth maps
+                     on our scans: the newer opf_format clouds sit about 0.35-0.4 m low,
+                     and a legacy-format cloud was tens of metres off (it is in the
+                     phone's session frame, not the scene frame). Use only to compare.
 """
 
 import argparse
@@ -133,6 +142,74 @@ def _read_legacy_pointcloud(gltf_path: Path):
     rgb_norm  = arr[:, 3:6]
     rgb_uint8 = (rgb_norm * 255).clip(0, 255).astype(np.uint8)
     return xyz_local, rgb_uint8
+
+
+def _depth_pointcloud(scan_dir: Path, frame_step: int = 1, pixel_step: int = 4,
+                      min_depth_m: float = 0.3, max_depth_m: float = 8.0):
+    """
+    Points from every frame_step-th frame's depth map (confidence 2 only, every
+    pixel_step-th depth pixel), placed with the frame's OPF pose, in the scene's
+    local frame (like the stored clouds, so _local_to_utm applies), with colours
+    sampled from the frame. Frames are read in their stored orientation (EXIF ignored),
+    which is the one the depth map and intrinsics refer to.
+    """
+    import cv2
+    opf = scan_dir / "opf_files"
+    inp = json.loads((opf / "input_cameras.json").read_text())
+    sensor = inp["sensors"][0]
+    f = float(sensor["internals"]["focal_length_px"])
+    cx, cy = (float(v) for v in sensor["internals"]["principal_point_px"])
+    img_w = int(sensor["image_size_px"][0])
+    proj = {c["id"]: c for c in json.loads((opf / "projected_input_cameras.json").read_text())["captures"]}
+    uri = {c["id"]: c["uri"].replace("../images/", "")
+           for c in json.loads((opf / "camera_list.json").read_text())["cameras"]}
+
+    xyz, rgb, used = [], [], 0
+    for cap in inp["captures"][::max(1, frame_step)]:
+        pc = proj.get(cap["id"])
+        if pc is None or "geolocation" not in pc or "position" not in pc["geolocation"]:
+            continue
+        image = depth = None
+        for cam in cap.get("cameras", []):
+            if "Image" in uri.get(cam["id"], ""):
+                image = uri[cam["id"]]
+            dm = cam.get("extensions", {}).get("PIX4D_input_depth_map", {}).get("id")
+            if dm in uri:
+                depth = uri[dm]
+        if image is None or depth is None:
+            continue
+        d = cv2.imread(str(scan_dir / "images" / depth), cv2.IMREAD_UNCHANGED)
+        conf = cv2.imread(str(scan_dir / "images" / depth.replace("DepthMap", "Confidence")), cv2.IMREAD_UNCHANGED)
+        img = cv2.imread(str(scan_dir / "images" / image), cv2.IMREAD_COLOR | cv2.IMREAD_IGNORE_ORIENTATION)
+        if d is None or d.ndim != 2 or img is None:
+            continue
+        ds = d.shape[1] / img_w
+        vv, uu = np.mgrid[0:d.shape[0]:pixel_step, 0:d.shape[1]:pixel_step]
+        z = d[vv, uu].astype(np.float64)
+        ok = (z >= min_depth_m) & (z <= max_depth_m)
+        if conf is not None and conf.shape == d.shape:
+            ok &= conf[vv, uu] >= 2
+        u, v, z = uu[ok] / ds, vv[ok] / ds, z[ok]
+        cam_pts = np.c_[(u - cx) / f * z, -(v - cy) / f * z, -z]       # OPF camera: x right, y up, z back
+        R = _rotation_opf(*pc["orientation"]["angles_deg"])
+        xyz.append(np.asarray(pc["geolocation"]["position"], dtype=np.float64) + cam_pts @ R.T)
+        ui = np.clip(u.astype(int), 0, img.shape[1] - 1)
+        vi = np.clip(v.astype(int), 0, img.shape[0] - 1)
+        rgb.append(img[vi, ui, ::-1])
+        used += 1
+    if not xyz:
+        raise RuntimeError(f"No readable depth maps with poses under {scan_dir}")
+    print(f"  Depth maps used: {used}")
+    return np.vstack(xyz), np.vstack(rgb).astype(np.uint8)
+
+
+def _rotation_opf(omega_deg: float, phi_deg: float, kappa_deg: float) -> np.ndarray:
+    """OPF camera->world rotation R = Rx(omega) Ry(phi) Rz(kappa) (as aruco_gcp/gcp_from_pix4d)."""
+    o, p, k = np.radians([omega_deg, phi_deg, kappa_deg])
+    Rx = np.array([[1, 0, 0], [0, np.cos(o), -np.sin(o)], [0, np.sin(o), np.cos(o)]])
+    Ry = np.array([[np.cos(p), 0, np.sin(p)], [0, 1, 0], [-np.sin(p), 0, np.cos(p)]])
+    Rz = np.array([[np.cos(k), -np.sin(k), 0], [np.sin(k), np.cos(k), 0], [0, 0, 1]])
+    return Rx @ Ry @ Rz
 
 
 def _local_to_utm(xyz_local: np.ndarray, shift: np.ndarray,
@@ -335,7 +412,8 @@ def _write_camera_poses(scan_dir: Path, out_path: Path):
     print(f"  Written: {out_path}  ({len(rows)} frames)")
 
 
-def process_scan(scan_dir: Path, out_dir: Path, dem_res: float, dsm_method: str = "linear"):
+def process_scan(scan_dir: Path, out_dir: Path, dem_res: float, dsm_method: str = "linear",
+                 source: str = "depth", frame_step: int = 1, pixel_step: int = 4):
     scan_name = scan_dir.name
     print(f"\nProcessing: {scan_name}")
 
@@ -350,8 +428,13 @@ def process_scan(scan_dir: Path, out_dir: Path, dem_res: float, dsm_method: str 
     else:
         print("  Warning: rtkGPS.csv not found; Z remains ellipsoidal", file=sys.stderr)
 
-    xyz_local, rgb = _read_gltf_pointcloud(scan_dir)
-    print(f"  Points read: {len(xyz_local):,}")
+    if source == "depth":
+        xyz_local, rgb = _depth_pointcloud(scan_dir, frame_step=frame_step, pixel_step=pixel_step)
+        print(f"  Points from depth maps: {len(xyz_local):,}")
+    else:
+        xyz_local, rgb = _read_gltf_pointcloud(scan_dir)
+        print(f"  Points read from the stored cloud: {len(xyz_local):,} "
+              "(may be offset; see --source in the module docstring)")
 
     xyz_utm = _local_to_utm(xyz_local, shift, geoid_sep=geoid_sep)
 
@@ -378,6 +461,13 @@ def main():
                         help="Gridding method: linear/nearest/cubic use scipy griddata "
                              "(interpolates gaps); max bins points and keeps highest Z "
                              "per cell — true DSM, no gap-filling (default: linear)")
+    parser.add_argument("--source", default="depth", choices=["depth", "cloud"],
+                        help="depth: build points from the frames' depth maps and poses (default); "
+                             "cloud: use the point cloud Pix4DCatch stored (may be offset)")
+    parser.add_argument("--frame-step", type=int, default=1,
+                        help="with --source depth: use every Nth frame (default 1)")
+    parser.add_argument("--pixel-step", type=int, default=4,
+                        help="with --source depth: use every Nth depth-map pixel (default 4)")
     args = parser.parse_args()
 
     scan_dir = Path(args.scan_dir).resolve()
@@ -385,7 +475,8 @@ def main():
         print(f"ERROR: {scan_dir} is not a directory", file=sys.stderr)
         sys.exit(1)
 
-    process_scan(scan_dir, Path(args.out_dir).resolve(), args.dem_res, args.dsm_method)
+    process_scan(scan_dir, Path(args.out_dir).resolve(), args.dem_res, args.dsm_method,
+                 source=args.source, frame_step=args.frame_step, pixel_step=args.pixel_step)
     print("\nDone.")
 
 
