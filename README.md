@@ -37,6 +37,33 @@ Details: [GCPs, heading sources and DEM notes](docs/GEOREFERENCING_PROCEDURE.md#
 | `planet_gcp_manual.py` | Manual fallback: click corresponding points in field photo and Planet GeoTIFF |
 | `scripts/dump_dataset_crs.py` | Print CRS, bounds, nodata, and quick stats for rasters and LAS/LAZ before terrain georeferencing |
 | `add_imu.py` | Write Roll/Pitch/Yaw to EXIF UserComment for images |
+| `gcp.py` | Load and save GCPs, refine the camera pose from GCPs, thin-plate-spline warp |
+| `aruco_gcp.py` | Find ArUco markers in a photo and locate the same markers in Pix4DCatch frames |
+| `label_gcp.py` | Click-to-label ArUco/GCP markers in a photo by hand |
+| `print_aruco_markers.py` | Printable ArUco marker sheets |
+| `drone_gcp_match.py` | Generate a GCP CSV by matching a field photo to a drone orthomosaic |
+| `gcp_from_pix4d.py` | Interactive RTK coordinate extraction from Pix4DCatch frames |
+| `validate_georef.py` | Accuracy validation of a fixed-mount node photo against DEM and Pix4DCatch scan |
+| `water_georef_workflow.py` | Interactive end-to-end terrain georeferencing and water-boundary export |
+| `flood_map.py` | Flood boundary extraction from a photo (SAM clicks) projected to GPS with DEM ray casting |
+| `vertical_datum.py` | Ellipsoid versus orthometric height checks and conversion |
+| `exif_imu.py` | EXIF GPS and IMU parsing used by the tools |
+| `unit_config.py` | Per-unit sensor configuration loader (schema in `unit_config.example.json`) |
+| `calib_filter.py`, `calib_filter_sensor_tree.py` | Pre-filter calibration images (sharpness, board geometry, diversity) |
+| `undistort_tool.py` | Undistortion utilities and batch/interactive viewer |
+| `planet_scene_pull.py` | Fetch PlanetScope scenes around a photo's EXIF location (API key required) |
+| `georeference3d.py`, `georeference_sharp.py`, `reconstruct3d.py`, `laz-viewer.py` | Experimental: 3D reconstruction, splat viewer, structure from motion, point cloud viewer |
+| `scripts/flood_extent_export.py` | Batch-project a binary flood mask to a GeoJSON polygon and GeoTIFF |
+| `scripts/survey_to_pose.py` | RTK survey plus one photo with ArUco targets to the camera's surveyed pose |
+| `scripts/pix4d_to_las_dem.py` | Pix4DCatch scan to LAZ, DEM GeoTIFF and camera-pose CSV (see `docs/PIX4DCATCH_DATA_FORMAT.md`) |
+| `scripts/pix4d_to_api_json.py`, `scripts/pix4d_to_viewer.py` | Export a scan to the API dashboard's JSON format, or to an HTML point-cloud viewer |
+| `scripts/validate_dsm.py` | Quality checks on a DSM (see `docs/DSM_VALIDATION.md`) |
+| `scripts/drone_dsm_ingest.py`, `scripts/odm_process.py` | Accept a drone DSM/DEM from any photogrammetry tool; submit drone images to NodeODM |
+| `scripts/flood_export.py` | Compare DSM sources for flood mapping |
+| `scripts/compare_mount_configs.py` | Compare EXIF pose with GCP-refined pose across mount configurations |
+| `scripts/collect_subdir_jpegs.py` | Flatten JPEGs from a folder tree into one folder |
+
+The full list with roles (library, core, helper, experimental) is the [module map](LLM_CONTEXT.md#module-map). Superseded scripts are in `archive/`.
 
 ## Shared package: `ufonet_geo`
 
@@ -55,11 +82,19 @@ It needs only numpy; the `dem` extra adds rasterio and pyproj. `camera_geometry.
 re-export from it, so existing imports keep working. Change the math in the
 package, not in a copy.
 
-Another project pins it by commit, without needing git in its build:
+Package version: `0.1.0` (`ufonet_geo.__version__`, requires Python 3.12 or newer; the repo's `.python-version` is 3.13).
+
+How other projects use it:
+
+- The API server pins it by commit in its `requirements.txt`, without needing git in its build:
 
 ```
 ufonet-geo @ https://github.com/WaterCam-Team/Georeferencing/archive/<commit>.tar.gz
 ```
+
+- SU-WaterCam vendors a copy of the package under `tools/ufonet_geo/`, at a recorded commit (the nodes do not fetch GitHub at run time). Its README there describes how to refresh the copy from a commit on this repo's main.
+
+Rule: a change to `ufonet_geo/` must keep both consumers working. Before merging, check that the API's tests (including its recorded golden outputs) and SU-WaterCam's tests still pass against the new commit, then update the API's pin and refresh SU-WaterCam's copy.
 
 Every file, with whether it is a library, core tool, helper or experiment: [module map](LLM_CONTEXT.md#module-map).
 

@@ -99,9 +99,7 @@ This is the one complete list of project files; README and the docs link here ra
 | `scripts/compare_mount_configs.py` | helper | Compare EXIF pose vs GCP-refined pose across mount configs. |
 | `scripts/collect_subdir_jpegs.py` | helper | Flatten JPEGs from a folder tree into one folder. |
 
-Copies elsewhere: SU-WaterCam `tools/` vendors `camera_geometry.py`, `geo_core.py` and a diverged `camera_calibration.py`
-(step 4 of the shared-package plan, `documentation/GEOREF_SHARED_MATH_PLAN.md`, not done yet). The API's ports in
-`app/georef_math.py` and `app/dem_math.py` move onto `ufonet_geo`; `tests/test_golden_api.py` holds their recorded outputs.
+Copies elsewhere: SU-WaterCam vendors `ufonet_geo/` under `tools/ufonet_geo/` at a recorded commit, and its `tools/camera_geometry.py` and `tools/geo_core.py` re-export from it; its `tools/camera_calibration.py` was a diverged copy (to confirm whether it still is). The API pins `ufonet_geo` by commit in its `requirements.txt`; its `app/georef_math.py` and `app/dem_math.py` are ports of the shared math that move onto `ufonet_geo` (to confirm: how far that has gone), with `tests/test_golden_api.py` holding their recorded outputs. Changes to `ufonet_geo/` must keep both consumers working (see README, "Shared package").
 
 ## Tests
 

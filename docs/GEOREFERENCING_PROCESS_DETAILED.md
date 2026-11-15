@@ -1,5 +1,7 @@
 # Detailed georeferencing process (terrain-first)
 
+> **Status 2026-11-14:** this document predates the shared `ufonet_geo` package and the site-survey workflow (`scripts/survey_to_pose.py`). Script names and the library locations it mentions may have moved (for example, the math now lives in `ufonet_geo/`, with the older modules re-exporting it). For the current procedure see [GEOREFERENCING_PROCEDURE.md](GEOREFERENCING_PROCEDURE.md). The terrain-first steps below have not been revised.
+
 This project’s **primary workflow** for real outdoor scenes is **terrain georeferencing**: intersecting camera rays with a **DEM** and/or **rasterized LAS/LAZ** (`georeference_terrain.py`). A horizontal ground plane (`georeference_tool.py`) is a **secondary** option for rare cases or for **optional pose refinement** from GCPs; it is documented briefly at the end.
 
 **Conventions:** WGS84 `lat`/`lon` for camera position unless you transform explicitly. Angles per `camera_geometry.py` (heading 0° = North, pitch **negative** = down). See [GEOREFERENCING_PROCEDURE.md](GEOREFERENCING_PROCEDURE.md) for calibration, IMU, and GCP basics.
