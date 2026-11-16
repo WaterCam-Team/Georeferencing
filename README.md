@@ -11,6 +11,8 @@ Camera calibration and pixel→GPS georeferencing for fixed-position and mobile 
 
 ## Full procedure
 
+**[How the flood map works](docs/HOW_IT_WORKS.md)** — the idea end to end: lens, pose, ground model, drawing the mask, accuracy.
+
 **[Step-by-step procedure for researchers](docs/GEOREFERENCING_PROCEDURE.md)** — camera calibration, BNO055/BNO08x IMU calibration, GCP collection, and accurate photo georeferencing.
 
 **[Detailed process (terrain-first)](docs/GEOREFERENCING_PROCESS_DETAILED.md)** — primary workflow for `georeference_terrain.py`, SU-WaterCam / Vidoc RTK / Pix4Dcatch notes, Planet/Pix4D ortho GCP scripts, and optional flat-ground tool.
