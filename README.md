@@ -57,6 +57,7 @@ Details: [GCPs, heading sources and DEM notes](docs/GEOREFERENCING_PROCEDURE.md#
 | `georeference3d.py`, `georeference_sharp.py`, `reconstruct3d.py`, `laz-viewer.py` | Experimental: 3D reconstruction, splat viewer, structure from motion, point cloud viewer |
 | `scripts/flood_extent_export.py` | Batch-project a binary flood mask to a GeoJSON polygon and GeoTIFF |
 | `scripts/survey_to_pose.py` | RTK survey plus one photo with ArUco targets to the camera's surveyed pose |
+| `scripts/scan_to_pose.py`, `scripts/scan_pose_overlay.py` | Camera pose from an RTK Pix4DCatch scan and one node photo, no targets; overlay and sweep check (see `docs/SCAN_TO_POSE.md`) |
 | `scripts/pix4d_to_las_dem.py` | Pix4DCatch scan to LAZ, DEM GeoTIFF and camera-pose CSV (see `docs/PIX4DCATCH_DATA_FORMAT.md`) |
 | `scripts/pix4d_to_api_json.py`, `scripts/pix4d_to_viewer.py` | Export a scan to the API dashboard's JSON format, or to an HTML point-cloud viewer |
 | `scripts/validate_dsm.py` | Quality checks on a DSM (see `docs/DSM_VALIDATION.md`) |

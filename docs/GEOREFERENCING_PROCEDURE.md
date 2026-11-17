@@ -198,6 +198,14 @@ The script writes the GCP CSV, a surveyed unit config, the API pose config
 - a leave-one-out error per target, with suspects flagged by the library's
   misfit and leverage check (`gcp._flag_leave_one_out`).
 
+### 4.3b Pose from a Pix4DCatch scan, without targets (`scripts/scan_to_pose.py`)
+
+If no targets were surveyed but an RTK-fixed Pix4DCatch scan of the camera's view exists,
+match the node's photo against the scan frames and solve the pose with PnP from the
+scan's depth: `scripts/scan_to_pose.py`, then check it with `scripts/scan_pose_overlay.py`
+(the sweep must peak at the solved angles) before uploading. Steps, acceptance values
+and accuracy: [SCAN_TO_POSE.md](SCAN_TO_POSE.md).
+
 - an API survey import (`survey_manifest_<unit>_<date>.json` plus the photo as
   `reference.jpg`): an open survey from `--valid-from` (default now) with the lens
   calibration, the solved pose as its base pose, the method, an accuracy line from the
