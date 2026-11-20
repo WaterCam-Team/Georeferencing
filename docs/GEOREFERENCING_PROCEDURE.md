@@ -204,7 +204,9 @@ If no targets were surveyed but an RTK-fixed Pix4DCatch scan of the camera's vie
 match the node's photo against the scan frames and solve the pose with PnP from the
 scan's depth: `scripts/scan_to_pose.py`, then check it with `scripts/scan_pose_overlay.py`
 (the sweep must peak at the solved angles) before uploading. Steps, acceptance values
-and accuracy: [SCAN_TO_POSE.md](SCAN_TO_POSE.md).
+and accuracy: [SCAN_TO_POSE.md](SCAN_TO_POSE.md). Then the point cloud, site image,
+bare-ground DEM and the API survey import from the same scan (`scripts/scan_survey_package.py`),
+with the field capture checklist and upload steps: [SCAN_SITE_SURVEY.md](SCAN_SITE_SURVEY.md).
 
 - an API survey import (`survey_manifest_<unit>_<date>.json` plus the photo as
   `reference.jpg`): an open survey from `--valid-from` (default now) with the lens

@@ -58,6 +58,7 @@ Details: [GCPs, heading sources and DEM notes](docs/GEOREFERENCING_PROCEDURE.md#
 | `scripts/flood_extent_export.py` | Batch-project a binary flood mask to a GeoJSON polygon and GeoTIFF |
 | `scripts/survey_to_pose.py` | RTK survey plus one photo with ArUco targets to the camera's surveyed pose |
 | `scripts/scan_to_pose.py`, `scripts/scan_pose_overlay.py` | Camera pose from an RTK Pix4DCatch scan and one node photo, no targets; overlay and sweep check (see `docs/SCAN_TO_POSE.md`) |
+| `scripts/scan_survey_package.py` | From the same scan: point cloud, site image, bare-ground DEM and the API survey manifest; field capture, checks and upload in `docs/SCAN_SITE_SURVEY.md` |
 | `scripts/pix4d_to_las_dem.py` | Pix4DCatch scan to LAZ, DEM GeoTIFF and camera-pose CSV (see `docs/PIX4DCATCH_DATA_FORMAT.md`) |
 | `scripts/pix4d_to_api_json.py`, `scripts/pix4d_to_viewer.py` | Export a scan to the API dashboard's JSON format, or to an HTML point-cloud viewer |
 | `scripts/validate_dsm.py` | Quality checks on a DSM (see `docs/DSM_VALIDATION.md`) |

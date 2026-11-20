@@ -59,9 +59,11 @@ Keep all of it under `private/<visit>/`: it holds site coordinates.
    - The sweep must peak at `+0.0` in all three rows (heading, pitch, roll). A row peaking
      off zero means that angle is off by about that much: find out why before uploading.
    - Match scores: ~0.3 is a good match; ~0 means unrelated.
-5. **Upload** the pose config (dashboard Georeference page, or `PUT /devices/{id}/pose-config`),
-   then reset the node's pose-monitor reference ("Accept current orientation") so node and
-   pose start from the same orientation.
+5. **Upload** as a site survey with the point cloud, site image and DEM:
+   [SCAN_SITE_SURVEY.md](SCAN_SITE_SURVEY.md). The pose config's `mount_height_m` is the
+   camera above the ground at the pole base; the survey needs the height above the water
+   plane or the DEM instead, which `scan_survey_package.py` works out. An open survey's base
+   pose, not the device pose config, places the node's captures.
 
 ## How it works
 
