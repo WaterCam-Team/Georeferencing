@@ -374,7 +374,8 @@ def main() -> int:
 
     try:
         heading, heading_src = cfg.resolve_heading(args.heading, exif["yaw_deg"],
-                                                   exif.get("calib_mag"))
+                                                   exif.get("calib_mag"),
+                                                   settled=bool(exif.get("heading_settled")))
     except uc.HeadingUnavailableError as e:
         print(f"[ERR] {e}", file=sys.stderr)
         return 2

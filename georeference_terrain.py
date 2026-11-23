@@ -705,6 +705,7 @@ def main() -> int:
     exif_altitude = None
     exif_yaw = None
     exif_calib_mag = None
+    exif_settled = False
     exif_pitch = None
     exif_roll = None
     if _HAS_GEOREF_TOOL:
@@ -726,12 +727,14 @@ def main() -> int:
         if exif_yaw is None and imu.get("yaw_deg") is not None:
             exif_yaw = imu["yaw_deg"]
         exif_calib_mag = imu.get("calib_mag")
+        exif_settled = bool(imu.get("heading_settled"))
     except Exception:
         pass
 
     # Resolve orientation: CLI > unit config > EXIF > 0
     try:
-        heading, h_src      = ucfg.resolve_heading(args.heading, exif_yaw, exif_calib_mag)
+        heading, h_src      = ucfg.resolve_heading(args.heading, exif_yaw, exif_calib_mag,
+                                                  settled=exif_settled)
     except _uc.HeadingUnavailableError as e:
         print(f"[ERR] {e}", file=sys.stderr)
         sys.exit(2)

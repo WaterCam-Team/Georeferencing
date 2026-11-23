@@ -169,13 +169,14 @@ class UnitConfig:
 
     def resolve_heading(self, cli_override: Optional[float],
                         exif_yaw: Optional[float],
-                        calib_mag: Optional[int] = None) -> tuple[float, str]:
+                        calib_mag: Optional[int] = None,
+                        settled: bool = False) -> tuple[float, str]:
         """
         (heading_deg, source): 'cli' > 'unit_config' > 'exif_yaw_corrected' |
         'exif_yaw_uncalibrated'; raises HeadingUnavailableError with none.
         See ufonet_geo.pose.resolve_heading for the CalibMag rules.
         """
-        return _pose.resolve_heading(self._d, cli_override, exif_yaw, calib_mag)
+        return _pose.resolve_heading(self._d, cli_override, exif_yaw, calib_mag, settled)
 
     def resolve_pitch_roll(self,
                            cli_pitch: Optional[float], cli_roll: Optional[float],
