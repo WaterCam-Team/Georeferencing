@@ -13,12 +13,15 @@ from pathlib import Path
 from typing import Optional
 
 # The UserComment parser lives in the package; re-exported for existing callers.
-from ufonet_geo.pose import parse_user_comment  # noqa: F401
+from ufonet_geo.pose import heading_settled, parse_user_comment  # noqa: F401
 
-# XMP tag names written by newer SU-WaterCam photos (attribute or element form)
+# XMP tag names written by newer SU-WaterCam photos (attribute or element form).
+# HeadingTrusted is SU-WaterCam's own verdict (mag status 2-3 or settled); it is
+# kept for reference, but resolve_heading uses MagOffsetsLoaded/FusionAgeS
+# (heading_settled) so its CalibMag threshold of 3 still applies.
 _XMP_NUM_TAGS = ("QuaternionW", "QuaternionX", "QuaternionY", "QuaternionZ",
-                 "GravityX", "GravityY", "GravityZ", "GPSFixAgeSeconds")
-_XMP_STR_TAGS = ("PoseReadTime", "GPSFixSource")
+                 "GravityX", "GravityY", "GravityZ", "GPSFixAgeSeconds", "FusionAgeS")
+_XMP_STR_TAGS = ("PoseReadTime", "GPSFixSource", "MagOffsetsLoaded", "HeadingTrusted")
 
 
 def parse_xmp_pose(data: bytes) -> dict:
@@ -26,7 +29,7 @@ def parse_xmp_pose(data: bytes) -> dict:
     txt = data.decode("utf-8", errors="ignore")
     out = {}
     for tag in _XMP_NUM_TAGS + _XMP_STR_TAGS:
-        m = re.search(r'(?:\w+:)?%s\s*=\s*"([^"]*)"' % tag, txt) or \
+        m = re.search(r'(?<![\w:])(?:\w+:)?%s\s*=\s*"([^"]*)"' % tag, txt) or \
             re.search(r"<(?:\w+:)?%s>([^<]*)<" % tag, txt)
         if not m:
             continue
@@ -71,9 +74,10 @@ def read_gps_imu_from_exif(path: str | Path) -> dict:
     Returns dict with keys:
         lat, lon, alt, roll_deg, pitch_deg, yaw_deg,
         calib_mag (0-3 or None), quaternion, gravity, pose_time,
-        gps_fix_source, gps_fix_age_s, xmp (dict of XMP pose fields).
-    Heading must only be taken from yaw_deg when calib_mag == 3
-    (see unit_config.resolve_heading).
+        gps_fix_source, gps_fix_age_s, xmp (dict of XMP pose fields),
+        heading_settled (saved mag offsets loaded and the fusion settled, from XMP).
+    Heading must only be taken from yaw_deg when calib_mag == 3 or
+    heading_settled (see unit_config.resolve_heading).
     """
     path = Path(path)
     meta = {
@@ -90,6 +94,7 @@ def read_gps_imu_from_exif(path: str | Path) -> dict:
         "gps_fix_source": None,
         "gps_fix_age_s": None,
         "xmp": {},
+        "heading_settled": False,
     }
 
     try:
@@ -141,5 +146,8 @@ def read_gps_imu_from_exif(path: str | Path) -> dict:
             meta["xmp"] = parse_xmp_pose(head)
     except Exception:
         pass
+    x = meta["xmp"]
+    meta["heading_settled"] = heading_settled(
+        str(x.get("MagOffsetsLoaded", "")).lower() == "true", x.get("FusionAgeS"))
 
     return meta

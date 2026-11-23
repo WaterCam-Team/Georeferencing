@@ -42,3 +42,44 @@ def test_xmp_attribute_and_element_forms():
     assert d["GPSFixSource"] == "CACHED"
     assert d["PoseReadTime"] == "2026-01-02T03:04:05Z"
     assert "QuaternionX" not in d
+
+
+def test_heading_trust_fields_from_xmp():
+    # SU-WaterCam #329 writes these with the other XMP pose fields
+    xmp = (b'<x:xmpmeta><rdf:Description dc:MagOffsetsLoaded="true" dc:FusionAgeS="95" '
+           b'dc:HeadingTrusted="true"/></x:xmpmeta>')
+    d = parse_xmp_pose(xmp)
+    assert d["MagOffsetsLoaded"] == "true" and d["FusionAgeS"] == 95.0 and d["HeadingTrusted"] == "true"
+
+
+def test_read_sets_heading_settled_from_the_photo(tmp_path):
+    import pytest
+    pytest.importorskip("PIL")
+    from PIL import Image
+    from exif_imu import read_gps_imu_from_exif
+
+    def photo(age):
+        path = tmp_path / f"p{age}.jpg"
+        Image.new("RGB", (4, 4)).save(path, "JPEG")
+        xmp = (b'<?xpacket begin=""?><x:xmpmeta><rdf:Description dc:MagOffsetsLoaded="true" '
+               b'dc:FusionAgeS="%d"/></x:xmpmeta><?xpacket end="w"?>' % age)
+        data = path.read_bytes()
+        path.write_bytes(data[:2] + xmp + data[2:])      # the reader only looks for the packet
+        return path
+    assert read_gps_imu_from_exif(photo(95))["heading_settled"] is True
+    assert read_gps_imu_from_exif(photo(20))["heading_settled"] is False
+
+
+def test_xmp_tag_must_not_match_inside_a_longer_name():
+    d = parse_xmp_pose(b'<x:xmpmeta><rdf:Description dc:OtherFusionAgeS="9" dc:FusionAgeS="95"/></x:xmpmeta>')
+    assert d["FusionAgeS"] == 95.0
+    assert "FusionAgeS" not in parse_xmp_pose(b'<rdf:Description dc:OtherFusionAgeS="9"/>')
+
+
+def test_settled_from_exiftool_output():
+    from validate_georef import _settled_from_exiftool
+    assert _settled_from_exiftool({"MagOffsetsLoaded": "true", "FusionAgeS": 95}) is True
+    assert _settled_from_exiftool({"MagOffsetsLoaded": "True", "FusionAgeS": "61"}) is True
+    assert _settled_from_exiftool({"MagOffsetsLoaded": "true", "FusionAgeS": 12}) is False
+    assert _settled_from_exiftool({"MagOffsetsLoaded": "false", "FusionAgeS": 95}) is False
+    assert _settled_from_exiftool({}) is False

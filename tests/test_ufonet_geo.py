@@ -242,3 +242,23 @@ def test_points_inside_the_valid_radius_are_unchanged():
     u, v = g.project_to_pixels(pts, K_STRONG, D_STRONG)
     ref, _ = cv2.projectPoints(pts, np.zeros(3), np.zeros(3), K_STRONG, D_STRONG)
     np.testing.assert_allclose(np.c_[u, v], ref.reshape(-1, 2), atol=1e-6)
+
+
+def test_heading_settled_rule():
+    from ufonet_geo.pose import HEADING_SETTLE_S, heading_settled
+    assert heading_settled(True, HEADING_SETTLE_S) and heading_settled(True, 95.0)
+    assert not heading_settled(True, 20.0) and not heading_settled(False, 95.0)
+    for bad in (None, float("nan"), True, "95"):
+        assert not heading_settled(True, bad)
+
+
+def test_a_settled_heading_counts_as_calibrated(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING):
+        # status 0 after a power-up, but the fusion had settled with the offsets loaded
+        assert resolve_heading({}, None, 100.0, calib_mag=0, settled=True) == (100.0, "exif_yaw_corrected")
+        assert resolve_heading({"heading_deg": 90}, None, 100.0, calib_mag=0, settled=True) == (90.0, "unit_config")
+    assert caplog.text == ""
+    with caplog.at_level(logging.WARNING):
+        assert resolve_heading({}, None, 100.0, calib_mag=0)[1] == "exif_yaw_uncalibrated"
+    assert "UNCALIBRATED" in caplog.text

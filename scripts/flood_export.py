@@ -116,7 +116,8 @@ def main():
     exif_alt = pose["altitude_m"]
     try:
         heading, h_src = ucfg.resolve_heading(args.heading, pose.get("heading"),
-                                              pose.get("calib_mag"))
+                                              pose.get("calib_mag"),
+                                              settled=bool(pose.get("settled")))
     except _uc.HeadingUnavailableError as e:
         print(f"[ERR] {e}", file=sys.stderr)
         sys.exit(2)
