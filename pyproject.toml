@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ufonet-geo"
 dynamic = ["version"]
-description = "Georeferencing core for WaterCam fixed cameras: pose, rays, terrain, flood-mask orthorectification"
+description = "Georeferencing core for fixed HazMapper sensors: pose, rays, terrain, flood-mask orthorectification"
 requires-python = ">=3.12"
 license-files = ["LICENSE"]
 dependencies = ["numpy>=1.24"]

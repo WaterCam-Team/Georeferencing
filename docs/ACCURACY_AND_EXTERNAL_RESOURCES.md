@@ -1,6 +1,6 @@
 # Improving georeferencing accuracy when sensor GPS and IMU are coarse
 
-**Audience:** Researchers and future maintainers. SU-WaterCam and similar devices often provide **coarse** GNSS position and **coarse** orientation (magnetometer-based heading, consumer IMU pitch/roll). This document explains **what errors dominate**, which **external resources** tighten each part of the solution, and **how this repository** ties them together.
+**Audience:** Researchers and future maintainers. HazMapper sensors and similar devices often provide **coarse** GNSS position and **coarse** orientation (magnetometer-based heading, consumer IMU pitch/roll). This document explains **what errors dominate**, which **external resources** tighten each part of the solution, and **how this repository** ties them together.
 
 **Related docs:** [GEOREFERENCING_PROCEDURE.md](GEOREFERENCING_PROCEDURE.md) (calibration, IMU basics), [GEOREFERENCING_PROCESS_DETAILED.md](GEOREFERENCING_PROCESS_DETAILED.md) (terrain-first workflow).
 

@@ -1,5 +1,5 @@
 """
-WaterCam Image Georeferencing Tool
+HazMapper Image Georeferencing Tool
 ====================================
 Estimates GPS coordinates for elements in images taken with the
 Dorhea/OV5647 camera used in the UFO-Net flood monitoring system.
@@ -367,7 +367,7 @@ class ClickGeoreferencer:
     """
     def __init__(self, image: np.ndarray, K: np.ndarray, D: np.ndarray,
                  R: np.ndarray, camera_lat: float, camera_lon: float,
-                 camera_height_m: float, window_name: str = "WaterCam Georeferencer",
+                 camera_height_m: float, window_name: str = "HazMapper Georeferencer",
                  gcps: Optional[list] = None,
                  heading_deg: float = 0.0, pitch_deg: float = 0.0, roll_deg: float = 0.0):
         self.orig_image       = image.copy()

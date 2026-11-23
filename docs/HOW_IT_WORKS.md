@@ -1,4 +1,4 @@
-# How the flood map works: from a camera photo to water on the map
+# How the flood map works: from a photo to water on the map
 
 This explains the idea behind the georeferencing, end to end. The step-by-step
 procedure for doing it at a site is in [GEOREFERENCING_PROCEDURE.md](GEOREFERENCING_PROCEDURE.md);
@@ -6,7 +6,7 @@ the code is the shared `ufonet_geo` package in this repository.
 
 ## The idea
 
-A camera unit sees a patch of ground. The unit labels each pixel of its photo as water or
+A HazMapper sensor (a unit) sees a patch of ground. The unit labels each pixel of its photo as water or
 not water, and sends that mask to the server. To put the mask on a map, the server needs to
 know, for each pixel, which point on the ground it shows. That depends on three things:
 

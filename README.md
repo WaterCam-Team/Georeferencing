@@ -72,7 +72,7 @@ The full list with roles (library, core, helper, experimental) is the [module ma
 ## Shared package: `ufonet_geo`
 
 The core math lives in the `ufonet_geo/` package. The scripts above use it,
-and so does the WaterCam API server (the dashboard's georeferencing and flood map):
+and so does the UFONet API server (the dashboard's georeferencing and flood map):
 
 | Module | What |
 |--------|------|
