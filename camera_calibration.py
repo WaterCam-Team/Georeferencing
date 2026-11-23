@@ -9,7 +9,7 @@ DEPENDENCIES:
     the corner preview use cv2.imshow/cv2.waitKey. The GeoTIFF export also
     needs GDAL (osgeo); use the distribution's python3-gdal.
 
-    For a WaterCam node, calibrate with the same OpenCV version as the node's
+    For a HazMapper node, calibrate with the same OpenCV version as the node's
     requirements.txt, so the node undistorts with the version that wrote the
     calibration. SU-WaterCam keeps a copy of this file in tools/ that differs
     only in this note; change the code here and copy it across.
