@@ -15,7 +15,10 @@ from typing import Optional
 # The UserComment parser lives in the package; re-exported for existing callers.
 from ufonet_geo.pose import heading_settled, parse_user_comment  # noqa: F401
 
-# XMP tag names written by newer SU-WaterCam photos (attribute or element form)
+# XMP tag names written by newer SU-WaterCam photos (attribute or element form).
+# HeadingTrusted is SU-WaterCam's own verdict (mag status 2-3 or settled); it is
+# kept for reference, but resolve_heading uses MagOffsetsLoaded/FusionAgeS
+# (heading_settled) so its CalibMag threshold of 3 still applies.
 _XMP_NUM_TAGS = ("QuaternionW", "QuaternionX", "QuaternionY", "QuaternionZ",
                  "GravityX", "GravityY", "GravityZ", "GPSFixAgeSeconds", "FusionAgeS")
 _XMP_STR_TAGS = ("PoseReadTime", "GPSFixSource", "MagOffsetsLoaded", "HeadingTrusted")
@@ -26,7 +29,7 @@ def parse_xmp_pose(data: bytes) -> dict:
     txt = data.decode("utf-8", errors="ignore")
     out = {}
     for tag in _XMP_NUM_TAGS + _XMP_STR_TAGS:
-        m = re.search(r'(?:\w+:)?%s\s*=\s*"([^"]*)"' % tag, txt) or \
+        m = re.search(r'(?<![\w:])(?:\w+:)?%s\s*=\s*"([^"]*)"' % tag, txt) or \
             re.search(r"<(?:\w+:)?%s>([^<]*)<" % tag, txt)
         if not m:
             continue

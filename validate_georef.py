@@ -36,7 +36,7 @@ def _dms_to_dec(degrees, minutes, seconds, ref):
 
 def read_exif_pose(image_path):
     """
-    Return dict with lat, lon, altitude_m, heading, pitch, roll.
+    Return dict with lat, lon, altitude_m, heading, calib_mag, pitch, roll, settled.
     Uses exiftool -j -n for numeric output.
     """
     import subprocess
@@ -70,7 +70,18 @@ def read_exif_pose(image_path):
         "lat": lat, "lon": lon,
         "altitude_m": alt,
         "heading": yaw, "calib_mag": calib_mag, "pitch": pitch, "roll": roll,
+        "settled": _settled_from_exiftool(data),
     }
+
+
+def _settled_from_exiftool(data) -> bool:
+    """heading_settled() from exiftool's XMP MagOffsetsLoaded / FusionAgeS (SU-WaterCam #329)."""
+    from ufonet_geo.pose import heading_settled
+    try:
+        age = float(data.get("FusionAgeS"))
+    except (TypeError, ValueError):
+        age = None
+    return heading_settled(str(data.get("MagOffsetsLoaded", "")).lower() == "true", age)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -310,7 +321,8 @@ def validate(image_path, dem_path, ucfg, pix4d_dir=None, grid_n=7,
 
     try:
         heading, h_src      = ucfg.resolve_heading(cli_heading, pose.get("heading"),
-                                                   pose.get("calib_mag"))
+                                                   pose.get("calib_mag"),
+                                                   settled=bool(pose.get("settled")))
     except _uc.HeadingUnavailableError as e:
         print(f"[ERR] {e}", file=sys.stderr)
         sys.exit(2)

@@ -68,3 +68,18 @@ def test_read_sets_heading_settled_from_the_photo(tmp_path):
         return path
     assert read_gps_imu_from_exif(photo(95))["heading_settled"] is True
     assert read_gps_imu_from_exif(photo(20))["heading_settled"] is False
+
+
+def test_xmp_tag_must_not_match_inside_a_longer_name():
+    d = parse_xmp_pose(b'<x:xmpmeta><rdf:Description dc:OtherFusionAgeS="9" dc:FusionAgeS="95"/></x:xmpmeta>')
+    assert d["FusionAgeS"] == 95.0
+    assert "FusionAgeS" not in parse_xmp_pose(b'<rdf:Description dc:OtherFusionAgeS="9"/>')
+
+
+def test_settled_from_exiftool_output():
+    from validate_georef import _settled_from_exiftool
+    assert _settled_from_exiftool({"MagOffsetsLoaded": "true", "FusionAgeS": 95}) is True
+    assert _settled_from_exiftool({"MagOffsetsLoaded": "True", "FusionAgeS": "61"}) is True
+    assert _settled_from_exiftool({"MagOffsetsLoaded": "true", "FusionAgeS": 12}) is False
+    assert _settled_from_exiftool({"MagOffsetsLoaded": "false", "FusionAgeS": 95}) is False
+    assert _settled_from_exiftool({}) is False
