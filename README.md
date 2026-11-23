@@ -32,7 +32,7 @@ Details: [GCPs, heading sources and DEM notes](docs/GEOREFERENCING_PROCEDURE.md#
 | Script | Purpose |
 |--------|--------|
 | `camera_calibration.py` | Checkerboard calibration → K, D, optional camera height; saves `calibration.json` |
-| `camera_geometry.py` | Shared rotation matrix (ENU ↔ camera); used by calibration and georeferencing |
+| `camera_geometry.py` | Rotation matrix (ENU ↔ camera), re-exported from `ufonet_geo.geometry`; used by calibration and georeferencing |
 | `georeference_tool.py` | Interactive click-to-GPS (flat ground), batch, optional GeoTIFF; uses calibration + IMU log or EXIF |
 | `georeference_terrain.py` | Click-to-GPS with DEM and/or LAS/LAZ terrain intersection |
 | `planet_gcp_match.py` | Generate a GCP CSV by matching a field photo to a Planet orthorectified GeoTIFF |
