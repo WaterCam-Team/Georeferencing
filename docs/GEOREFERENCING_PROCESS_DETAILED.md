@@ -31,10 +31,10 @@ Terrain mode requires **`rasterio`** (GeoTIFF DEM) and/or **`laspy`** with a LAZ
 | **Terrain** | GeoTIFF DEM and/or LAS/LAZ with **known or inferable CRS**; inspect with `scripts/dump_dataset_crs.py` or `gdalinfo`. |
 | **Vertical datum** | Often **not** fully embedded in rasters — confirm from **data provider docs**; use `--terrain-vertical-datum` / `--camera-elev-datum` when converting EXIF altitude, or prefer **`--height-above-ground`**. |
 
-### 1.3 SU-WaterCam
+### 1.3 HazMapper nodes (SU-WaterCam)
 
-- Aligns with **WaterCam** usage: EXIF GPS, UserComment orientation when present, checkerboard calibration to `calibration.json`.
-- See sibling **SU-WaterCam** project for hardware-specific capture notes.
+- Aligns with what the **HazMapper** nodes write: EXIF GPS, UserComment orientation when present, checkerboard calibration to `calibration.json`.
+- See the sibling **SU-WaterCam** repo (the node software) for hardware-specific capture notes.
 
 ### 1.4 Vidoc RTK + Pix4Dcatch
 
