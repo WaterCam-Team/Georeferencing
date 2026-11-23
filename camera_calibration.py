@@ -2,7 +2,17 @@
 Camera Calibration & Georeferencing Pipeline
 =============================================
 DEPENDENCIES:
-    pip install opencv-python numpy scipy Pillow piexif pyproj
+    pip install opencv-python numpy scipy Pillow piexif
+
+    This is a workstation tool. It needs the full OpenCV build with windows
+    (opencv-python, not opencv-python-headless): the interactive capture and
+    the corner preview use cv2.imshow/cv2.waitKey. The GeoTIFF export also
+    needs GDAL (osgeo); use the distribution's python3-gdal.
+
+    For a HazMapper node, calibrate with the same OpenCV version as the node's
+    requirements.txt, so the node undistorts with the version that wrote the
+    calibration. SU-WaterCam keeps a copy of this file in tools/ that differs
+    only in this note; change the code here and copy it across.
 
 WORKFLOW OVERVIEW:
     1. Capture calibration images of a checkerboard
@@ -224,11 +234,33 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         img_size = (gray.shape[1], gray.shape[0])  # (width, height)
 
-        found, corners = cv2.findChessboardCorners(gray, board_size, None)
+        # Try the sector-based detector first. The classic findChessboardCorners
+        # with no flags handles the calib.io 24x17 target fine on clean frames
+        # (6/6 on Calibration Data/calib_images, which is the set the shipped
+        # config/camera_calibration.json was computed from). It degrades badly on
+        # marginal ones: on Calibration Data/usable, which mixes NIR-ON frames
+        # with low board contrast, it found 0/6 where SB found 3/6. SB is also
+        # slightly more accurate -- recomputing calib_images through it gives
+        # 0.2636 px against the shipped 0.2784. SB returns sub-pixel corners
+        # already, so it needs no cornerSubPix pass.
+        found, corners = False, None
+        used_sb = False
+        if hasattr(cv2, "findChessboardCornersSB"):
+            try:
+                found, corners = cv2.findChessboardCornersSB(
+                    gray, board_size,
+                    flags=cv2.CALIB_CB_EXHAUSTIVE | cv2.CALIB_CB_ACCURACY)
+                used_sb = bool(found)
+            except cv2.error:
+                found = False
+        if not found:
+            found, corners = cv2.findChessboardCorners(
+                gray, board_size,
+                flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE)
 
         if found:
-            # Refine corner positions to sub-pixel accuracy
-            corners_refined = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            corners_refined = corners if used_sb else cv2.cornerSubPix(
+                gray, corners, (11, 11), (-1, -1), criteria)
             objpoints.append(objp)
             imgpoints.append(corners_refined)
             valid_paths.append(path)
@@ -450,7 +482,7 @@ def pixel_to_ground_coords(pixel_xy: tuple, intrinsics: CameraIntrinsics,
       1. Convert pixel to a normalized ray in camera space using K^-1
       2. Rotate the ray into the world (ENU) frame using R^T
       3. Find where the ray intersects Z=0 (ground plane)
-      4. Convert ENU offset (meters) to lat/lon using pyproj
+      4. Convert ENU offset (meters) to lat/lon (local tangent plane, ufonet_geo)
 
     PARAMETERS:
         pixel_xy         : (u, v) pixel coordinates in the undistorted image
